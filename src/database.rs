@@ -1,9 +1,9 @@
-use tokio::sync::{broadcast, Notify};
+use tokio::sync::{broadcast, Notify, Mutex};
 use tokio::time::{self, Duration, Instant};
 
 use bytes::Bytes;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc/*, Mutex*/};
 use tracing::debug;
 use std::env;
 use sqlx::sqlite::SqlitePool;
@@ -114,7 +114,11 @@ struct Entry {
 impl DatabaseDropGuard {
     /// Create a new `DatabaseHolder`, wrapping a `Database` instance. When this is dropped
     /// the `Database`'s purge task will be shut down.
-    pub(crate) fn new() -> DatabaseDropGuard {
+    pub(crate) async fn new() -> DatabaseDropGuard {
+        let db: Database = Database::new();
+        db.set("velocity".into(), "nonused".into(), Some(Duration::from_millis(500))).await;
+        db.set("location".into(), "nonused".into(), Some(Duration::from_millis(1000))).await;
+
         DatabaseDropGuard { database: Database::new() }
     }
 
@@ -136,7 +140,7 @@ impl Database {
     /// Create a new, empty, `Database` instance. Allocates shared state and spawns a
     /// background task to manage key expiration.
     pub(crate) fn new() -> Database {
-        let url: String = env::var("DATABASE_URL").unwrap_or("sqlite://:memory:".to_string());
+        let url: String = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://:memory:".to_string());
 
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
@@ -161,12 +165,12 @@ impl Database {
     /// Returns `None` if there is no value associated with the key. This may be
     /// due to never having assigned a value to the key or a previously assigned
     /// value expired.
-    pub(crate) fn get(&self, key: &str) -> Option<Bytes> {
+    pub(crate) async fn get(&self, key: &str) -> Option<Bytes> {
         // Acquire the lock, get the entry and clone the value.
         //
         // Because data is stored using `Bytes`, a clone here is a shallow
         // clone. Data is not copied.
-        let state = self.shared.state.lock().unwrap();
+        let state = self.shared.state.lock().await;
         state.entries.get(key).map(|entry| entry.data.clone())
     }
 
@@ -174,8 +178,8 @@ impl Database {
     /// Duration.
     ///
     /// If a value is already associated with the key, it is removed.
-    pub(crate) fn set(&self, key: String, value: Bytes, period: Option<Duration>) {
-        let mut state = self.shared.state.lock().unwrap();
+    pub(crate) async fn set(&self, key: String, value: Bytes, period: Option<Duration>) {
+        let mut state = self.shared.state.lock().await;
 
         // Get and increment the next insertion ID. Guarded by the lock, this
         // ensures a unique identifier is associated with each `set` operation.
@@ -293,10 +297,10 @@ impl Database {
 
     /// Signals the purge background task to shut down. This is called by the
     /// `DatabaseShutdown`s `Drop` implementation.
-    fn shutdown_purge_task(&self) {
+    async fn shutdown_purge_task(&self) {
         // The background task must be signaled to shut down. This is done by
         // setting `State::shutdown` to `true` and signalling the task.
-        let mut state = self.shared.state.lock().unwrap();
+        let mut state = self.shared.state.lock().await;
         state.shutdown = true;
 
         // Drop the lock before signalling the background task. This helps
@@ -310,8 +314,8 @@ impl Database {
 impl Shared {
     /// Purge all expired keys and return the `Instant` at which the **next**
     /// key will expire. The background task will sleep until this instant.
-    fn insert_expired_keys(&self) -> Option<Instant> {
-        let mut state = self.state.lock().unwrap();
+    async fn insert_expired_keys(&self) -> Option<Instant> {
+        let mut state = self.state.lock().await;
 
         if state.shutdown {
             // The database is shutting down. All handles to the shared state
@@ -337,23 +341,18 @@ impl Shared {
                 return Some(when);
             }
 
-            // The key expired, remove it
-            //state.entries.remove(key);
-            //state.expirations.remove(&(when, id));
+            {
+                let mut conn = state.pool.acquire().await.ok()?;
 
+                let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#, 100.0, 999.9)
+                    .execute(&mut conn)
+                    .await.ok()?
+                    .last_insert_rowid();
+            }
+
+
+            state.expirations.remove(&(when, id));
             // calculate the next expiration and insert it into the expirations map
-            /*let id = state.next_id;
-            state.next_id += 1;
-
-            if let Some(Some(expires_at)) = state.entries.get(key).map(|entry| {
-                let expires_at = entry.period.map(|duration| {
-                    let when = Instant::now() + duration;
-                    when
-                });
-                expires_at
-            }) {
-                state.expirations.insert((expires_at, id), key.clone());
-            }*/
             if let Some(Some(expires_at)) = state.entries.get(key).map(|entry| {
                 entry.period.map(|duration| {
                     Instant::now() + duration
@@ -363,7 +362,6 @@ impl Shared {
                 state.next_id += 1;
                 state.expirations.insert((expires_at, id), key.clone());
             }
-            state.expirations.remove(&(when, id));
         }
 
         None
@@ -373,8 +371,8 @@ impl Shared {
     ///
     /// The `shutdown` flag is set when all `Database` values have dropped, indicating
     /// that the shared state can no longer be accessed.
-    fn is_shutdown(&self) -> bool {
-        self.state.lock().unwrap().shutdown
+    async fn is_shutdown(&self) -> bool {
+        self.state.lock().await.shutdown
     }
 }
 
@@ -393,11 +391,11 @@ impl State {
 /// state handle. If `shutdown` is set, terminate the task.
 async fn insert_expired_tasks(shared: Arc<Shared>) {
     // If the shutdown flag is set, then the task should exit.
-    while !shared.is_shutdown() {
+    while !shared.is_shutdown().await {
         // Purge all keys that are expired. The function returns the instant at
         // which the **next** key will expire. The worker should wait until the
         // instant has passed then purge again.
-        if let Some(when) = shared.insert_expired_keys() {
+        if let Some(when) = shared.insert_expired_keys().await {
             // Wait until the next key expires **or** until the background task
             // is notified. If the task is notified, then it must reload its
             // state as new keys have been set to expire early. This is done by

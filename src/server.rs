@@ -25,6 +25,7 @@ struct Listener {
     /// This holds a wrapper around an `Arc`. The internal `Cache` can be
     /// retrieved and passed into the per connection state (`Handler`).
     cache_holder: CacheDropGuard,
+    database_holder: DatabaseDropGuard,
 
     /// TCP listener supplied by the `run` caller.
     listener: TcpListener,
@@ -142,6 +143,7 @@ pub async fn run(listener: TcpListener, shutdown: impl Future) {
     let mut server = Listener {
         listener,
         cache_holder: CacheDropGuard::new(),
+        database_holder: DatabaseDropGuard::new().await,
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
         notify_shutdown,
         shutdown_complete_tx,
