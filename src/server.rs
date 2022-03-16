@@ -4,6 +4,7 @@
 //! spawning a task per connection.
 
 use crate::{Command, Connection, Cache, CacheDropGuard, Shutdown};
+use crate::{Database, DatabaseDropGuard};
 
 use std::future::Future;
 use std::sync::Arc;

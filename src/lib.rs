@@ -41,6 +41,10 @@ mod cache;
 use cache::Cache;
 use cache::CacheDropGuard;
 
+mod database;
+use database::Database;
+use database::DatabaseDropGuard;
+
 mod parse;
 use parse::{Parse, ParseError};
 
@@ -55,7 +59,7 @@ use shutdown::Shutdown;
 /// Default port that a redis server listens on.
 ///
 /// Used if no port is specified.
-pub const DEFAULT_PORT: &str = "6379";
+pub const DEFAULT_PORT: &str = "6397";
 
 /// Error returned by most functions.
 ///
