@@ -1,4 +1,4 @@
-use mini_redis::{client, DEFAULT_PORT};
+use flatbread::{client, DEFAULT_PORT};
 
 use bytes::Bytes;
 use std::num::ParseIntError;
@@ -7,7 +7,7 @@ use std::time::Duration;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "mini-redis-cli", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "Issue Redis commands")]
+#[structopt(name = "flatbread-cli", version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "Issue Redis commands")]
 struct Cli {
     #[structopt(subcommand)]
     command: Command,
@@ -65,7 +65,7 @@ enum Command {
 /// threads. The CLI tool use case benefits more by being lighter instead of
 /// multi-threaded.
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> mini_redis::Result<()> {
+async fn main() -> flatbread::Result<()> {
     // Enable logging
     tracing_subscriber::fmt::try_init()?;
 

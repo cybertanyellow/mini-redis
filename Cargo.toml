@@ -1,23 +1,24 @@
 [package]
-authors = ["Carl Lerche <me@carllerche.com>"]
+authors = ["Carl Lerche <me@carllerche.com>", "Yellow Huang <yellow_huang@arcadyan.com.tw>"]
 edition = "2018"
-name = "mini-redis"
-version = "0.4.1"
+name = "flatbread"
+version = "0.0.1"
 license = "MIT"
 readme = "README.md"
 documentation = "https://docs.rs/mini-redis/0.4.0/mini-redis/"
 repository = "https://github.com/tokio-rs/mini-redis"
 description = """
+Based on mini-redis but porting to support ARC flatbread(16-1) project.
 An incomplete implementation of a Rust client and server. Used as a
 larger example of an idiomatic Tokio application.
 """
 
 [[bin]]
-name = "mini-redis-cli"
+name = "flatbread-cli"
 path = "src/bin/cli.rs"
 
 [[bin]]
-name = "mini-redis-server"
+name = "flatbread-server"
 path = "src/bin/server.rs"
 
 [dependencies]

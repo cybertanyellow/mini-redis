@@ -35,7 +35,7 @@ pub enum Command {
 impl Command {
     /// Parse a command from a received frame.
     ///
-    /// The `Frame` must represent a Redis command supported by `mini-redis` and
+    /// The `Frame` must represent a Redis command supported by `flatbread` and
     /// be the array variant.
     ///
     /// # Returns

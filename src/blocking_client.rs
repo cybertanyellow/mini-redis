@@ -59,7 +59,7 @@ struct SubscriberIterator {
 /// # Examples
 ///
 /// ```no_run
-/// use mini_redis::blocking_client;
+/// use flatbread::blocking_client;
 ///
 /// fn main() {
 ///     let client = match blocking_client::connect("localhost:6379") {
@@ -89,7 +89,7 @@ impl BlockingClient {
     /// Demonstrates basic usage.
     ///
     /// ```no_run
-    /// use mini_redis::blocking_client;
+    /// use flatbread::blocking_client;
     ///
     /// fn main() {
     ///     let mut client = blocking_client::connect("localhost:6379").unwrap();
@@ -115,7 +115,7 @@ impl BlockingClient {
     /// Demonstrates basic usage.
     ///
     /// ```no_run
-    /// use mini_redis::blocking_client;
+    /// use flatbread::blocking_client;
     ///
     /// fn main() {
     ///     let mut client = blocking_client::connect("localhost:6379").unwrap();
@@ -149,7 +149,7 @@ impl BlockingClient {
     /// favorable.
     ///
     /// ```no_run
-    /// use mini_redis::blocking_client;
+    /// use flatbread::blocking_client;
     /// use std::thread;
     /// use std::time::Duration;
     ///
@@ -191,7 +191,7 @@ impl BlockingClient {
     /// Demonstrates basic usage.
     ///
     /// ```no_run
-    /// use mini_redis::blocking_client;
+    /// use flatbread::blocking_client;
     ///
     /// fn main() {
     ///     let mut client = blocking_client::connect("localhost:6379").unwrap();

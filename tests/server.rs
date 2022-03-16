@@ -1,4 +1,4 @@
-use mini_redis::server;
+use flatbread::server;
 
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

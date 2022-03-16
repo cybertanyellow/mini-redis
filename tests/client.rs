@@ -1,4 +1,4 @@
-use mini_redis::{client, server};
+use flatbread::{client, server};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
