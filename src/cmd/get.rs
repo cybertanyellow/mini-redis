@@ -1,4 +1,4 @@
-use crate::{Connection, Db, Frame, Parse};
+use crate::{Connection, Cache, Frame, Parse};
 
 use bytes::Bytes;
 use tracing::{debug, instrument};
@@ -56,14 +56,14 @@ impl Get {
         Ok(Get { key })
     }
 
-    /// Apply the `Get` command to the specified `Db` instance.
+    /// Apply the `Get` command to the specified `Cache` instance.
     ///
     /// The response is written to `dst`. This is called by the server in order
     /// to execute a received command.
-    #[instrument(skip(self, db, dst))]
-    pub(crate) async fn apply(self, db: &Db, dst: &mut Connection) -> crate::Result<()> {
+    #[instrument(skip(self, cache, dst))]
+    pub(crate) async fn apply(self, cache: &Cache, dst: &mut Connection) -> crate::Result<()> {
         // Get the value from the shared database state
-        let response = if let Some(value) = db.get(&self.key) {
+        let response = if let Some(value) = cache.get(&self.key) {
             // If a value is present, it is written to the client in "bulk"
             // format.
             Frame::Bulk(value)

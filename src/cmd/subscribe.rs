@@ -1,5 +1,5 @@
 use crate::cmd::{Parse, ParseError, Unknown};
-use crate::{Command, Connection, Db, Frame, Shutdown};
+use crate::{Command, Connection, Cache, Frame, Shutdown};
 
 use bytes::Bytes;
 use std::pin::Pin;
@@ -91,7 +91,7 @@ impl Subscribe {
         Ok(Subscribe { channels })
     }
 
-    /// Apply the `Subscribe` command to the specified `Db` instance.
+    /// Apply the `Subscribe` command to the specified `Cache` instance.
     ///
     /// This function is the entry point and includes the initial list of
     /// channels to subscribe to. Additional `subscribe` and `unsubscribe`
@@ -101,7 +101,7 @@ impl Subscribe {
     /// [here]: https://redis.io/topics/pubsub
     pub(crate) async fn apply(
         mut self,
-        db: &Db,
+        cache: &Cache,
         dst: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> crate::Result<()> {
@@ -121,7 +121,7 @@ impl Subscribe {
             // to. When new `SUBSCRIBE` commands are received during the
             // execution of `apply`, the new channels are pushed onto this vec.
             for channel_name in self.channels.drain(..) {
-                subscribe_to_channel(channel_name, &mut subscriptions, db, dst).await?;
+                subscribe_to_channel(channel_name, &mut subscriptions, cache, dst).await?;
             }
 
             // Wait for one of the following to happen:
@@ -172,10 +172,10 @@ impl Subscribe {
 async fn subscribe_to_channel(
     channel_name: String,
     subscriptions: &mut StreamMap<String, Messages>,
-    db: &Db,
+    cache: &Cache,
     dst: &mut Connection,
 ) -> crate::Result<()> {
-    let mut rx = db.subscribe(channel_name.clone());
+    let mut rx = cache.subscribe(channel_name.clone());
 
     // Subscribe to the channel.
     let rx = Box::pin(async_stream::stream! {

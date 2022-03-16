@@ -6,30 +6,30 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 
-/// A wrapper around a `Db` instance. This exists to allow orderly cleanup
-/// of the `Db` by signalling the background purge task to shut down when
+/// A wrapper around a `Cache` instance. This exists to allow orderly cleanup
+/// of the `Cache` by signalling the background purge task to shut down when
 /// this struct is dropped.
 #[derive(Debug)]
-pub(crate) struct DbDropGuard {
-    /// The `Db` instance that will be shut down when this `DbHolder` struct
+pub(crate) struct CacheDropGuard {
+    /// The `Cache` instance that will be shut down when this `CacheHolder` struct
     /// is dropped.
-    db: Db,
+    cache: Cache,
 }
 
 /// Server state shared across all connections.
 ///
-/// `Db` contains a `HashMap` storing the key/value data and all
+/// `Cache` contains a `HashMap` storing the key/value data and all
 /// `broadcast::Sender` values for active pub/sub channels.
 ///
-/// A `Db` instance is a handle to shared state. Cloning `Db` is shallow and
+/// A `Cache` instance is a handle to shared state. Cloning `Cache` is shallow and
 /// only incurs an atomic ref count increment.
 ///
-/// When a `Db` value is created, a background task is spawned. This task is
+/// When a `Cache` value is created, a background task is spawned. This task is
 /// used to expire values after the requested duration has elapsed. The task
-/// runs until all instances of `Db` are dropped, at which point the task
+/// runs until all instances of `Cache` are dropped, at which point the task
 /// terminates.
 #[derive(Debug, Clone)]
-pub(crate) struct Db {
+pub(crate) struct Cache {
     /// Handle to shared state. The background task will also have an
     /// `Arc<Shared>`.
     shared: Arc<Shared>,
@@ -83,7 +83,7 @@ struct State {
     /// with a unique identifier. See above for why.
     next_id: u64,
 
-    /// True when the Db instance is shutting down. This happens when all `Db`
+    /// True when the Cache instance is shutting down. This happens when all `Cache`
     /// values drop. Setting this to `true` signals to the background task to
     /// exit.
     shutdown: bool,
@@ -103,31 +103,31 @@ struct Entry {
     expires_at: Option<Instant>,
 }
 
-impl DbDropGuard {
-    /// Create a new `DbHolder`, wrapping a `Db` instance. When this is dropped
-    /// the `Db`'s purge task will be shut down.
-    pub(crate) fn new() -> DbDropGuard {
-        DbDropGuard { db: Db::new() }
+impl CacheDropGuard {
+    /// Create a new `CacheHolder`, wrapping a `Cache` instance. When this is dropped
+    /// the `Cache`'s purge task will be shut down.
+    pub(crate) fn new() -> CacheDropGuard {
+        CacheDropGuard { cache: Cache::new() }
     }
 
     /// Get the shared database. Internally, this is an
     /// `Arc`, so a clone only increments the ref count.
-    pub(crate) fn db(&self) -> Db {
-        self.db.clone()
+    pub(crate) fn cache(&self) -> Cache {
+        self.cache.clone()
     }
 }
 
-impl Drop for DbDropGuard {
+impl Drop for CacheDropGuard {
     fn drop(&mut self) {
-        // Signal the 'Db' instance to shut down the task that purges expired keys
-        self.db.shutdown_purge_task();
+        // Signal the 'Cache' instance to shut down the task that purges expired keys
+        self.cache.shutdown_purge_task();
     }
 }
 
-impl Db {
-    /// Create a new, empty, `Db` instance. Allocates shared state and spawns a
+impl Cache {
+    /// Create a new, empty, `Cache` instance. Allocates shared state and spawns a
     /// background task to manage key expiration.
-    pub(crate) fn new() -> Db {
+    pub(crate) fn new() -> Cache {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 entries: HashMap::new(),
@@ -142,7 +142,7 @@ impl Db {
         // Start the background task.
         tokio::spawn(purge_expired_tasks(shared.clone()));
 
-        Db { shared }
+        Cache { shared }
     }
 
     /// Get the value associated with a key.
@@ -278,7 +278,7 @@ impl Db {
     }
 
     /// Signals the purge background task to shut down. This is called by the
-    /// `DbShutdown`s `Drop` implementation.
+    /// `CacheShutdown`s `Drop` implementation.
     fn shutdown_purge_task(&self) {
         // The background task must be signaled to shut down. This is done by
         // setting `State::shutdown` to `true` and signalling the task.
@@ -332,7 +332,7 @@ impl Shared {
 
     /// Returns `true` if the database is shutting down
     ///
-    /// The `shutdown` flag is set when all `Db` values have dropped, indicating
+    /// The `shutdown` flag is set when all `Cache` values have dropped, indicating
     /// that the shared state can no longer be accessed.
     fn is_shutdown(&self) -> bool {
         self.state.lock().unwrap().shutdown

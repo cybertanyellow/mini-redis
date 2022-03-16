@@ -16,7 +16,7 @@ pub use ping::Ping;
 mod unknown;
 pub use unknown::Unknown;
 
-use crate::{Connection, Db, Frame, Parse, ParseError, Shutdown};
+use crate::{Connection, Cache, Frame, Parse, ParseError, Shutdown};
 
 /// Enumeration of supported Redis commands.
 ///
@@ -83,23 +83,23 @@ impl Command {
         Ok(command)
     }
 
-    /// Apply the command to the specified `Db` instance.
+    /// Apply the command to the specified `Cache` instance.
     ///
     /// The response is written to `dst`. This is called by the server in order
     /// to execute a received command.
     pub(crate) async fn apply(
         self,
-        db: &Db,
+        cache: &Cache,
         dst: &mut Connection,
         shutdown: &mut Shutdown,
     ) -> crate::Result<()> {
         use Command::*;
 
         match self {
-            Get(cmd) => cmd.apply(db, dst).await,
-            Publish(cmd) => cmd.apply(db, dst).await,
-            Set(cmd) => cmd.apply(db, dst).await,
-            Subscribe(cmd) => cmd.apply(db, dst, shutdown).await,
+            Get(cmd) => cmd.apply(cache, dst).await,
+            Publish(cmd) => cmd.apply(cache, dst).await,
+            Set(cmd) => cmd.apply(cache, dst).await,
+            Subscribe(cmd) => cmd.apply(cache, dst, shutdown).await,
             Ping(cmd) => cmd.apply(dst).await,
             Unknown(cmd) => cmd.apply(dst).await,
             // `Unsubscribe` cannot be applied. It may only be received from the

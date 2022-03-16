@@ -37,9 +37,9 @@ pub use connection::Connection;
 pub mod frame;
 pub use frame::Frame;
 
-mod db;
-use db::Db;
-use db::DbDropGuard;
+mod cache;
+use cache::Cache;
+use cache::CacheDropGuard;
 
 mod parse;
 use parse::{Parse, ParseError};

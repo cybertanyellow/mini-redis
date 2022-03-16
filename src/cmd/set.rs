@@ -1,5 +1,5 @@
 use crate::cmd::{Parse, ParseError};
-use crate::{Connection, Db, Frame};
+use crate::{Connection, Cache, Frame};
 
 use bytes::Bytes;
 use std::time::Duration;
@@ -120,14 +120,14 @@ impl Set {
         Ok(Set { key, value, expire })
     }
 
-    /// Apply the `Set` command to the specified `Db` instance.
+    /// Apply the `Set` command to the specified `Cache` instance.
     ///
     /// The response is written to `dst`. This is called by the server in order
     /// to execute a received command.
-    #[instrument(skip(self, db, dst))]
-    pub(crate) async fn apply(self, db: &Db, dst: &mut Connection) -> crate::Result<()> {
+    #[instrument(skip(self, cache, dst))]
+    pub(crate) async fn apply(self, cache: &Cache, dst: &mut Connection) -> crate::Result<()> {
         // Set the value in the shared database state.
-        db.set(self.key, self.value, self.expire);
+        cache.set(self.key, self.value, self.expire);
 
         // Create a success response and write it to `dst`.
         let response = Frame::Simple("OK".to_string());

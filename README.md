@@ -89,11 +89,11 @@ various capabilities are exposed as `async` methods.
 
 ### State shared across sockets
 
-The server maintains a [`Db`] instance that is accessible from all connected
-connections. The [`Db`] instance manages the key-value state as well as pub/sub
+The server maintains a [`Cache`] instance that is accessible from all connected
+connections. The [`Cache`] instance manages the key-value state as well as pub/sub
 capabilities.
 
-[`Db`]: src/db.rs
+[`Cache`]: src/cache.rs
 
 ### Framing
 
@@ -133,7 +133,7 @@ the server to update the active subscriptions.
 ### Using a `std::sync::Mutex` in an async application
 
 The server uses a `std::sync::Mutex` and **not** a Tokio mutex to synchronize
-access to shared state. See [`db.rs`](src/db.rs) for more details.
+access to shared state. See [`cache.rs`](src/cache.rs) for more details.
 
 ### Testing asynchronous code that relies on time
 

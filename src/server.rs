@@ -3,7 +3,7 @@
 //! Provides an async `run` function that listens for inbound connections,
 //! spawning a task per connection.
 
-use crate::{Command, Connection, Db, DbDropGuard, Shutdown};
+use crate::{Command, Connection, Cache, CacheDropGuard, Shutdown};
 
 use std::future::Future;
 use std::sync::Arc;
@@ -21,9 +21,9 @@ struct Listener {
     /// Contains the key / value store as well as the broadcast channels for
     /// pub/sub.
     ///
-    /// This holds a wrapper around an `Arc`. The internal `Db` can be
+    /// This holds a wrapper around an `Arc`. The internal `Cache` can be
     /// retrieved and passed into the per connection state (`Handler`).
-    db_holder: DbDropGuard,
+    cache_holder: CacheDropGuard,
 
     /// TCP listener supplied by the `run` caller.
     listener: TcpListener,
@@ -65,15 +65,15 @@ struct Listener {
 }
 
 /// Per-connection handler. Reads requests from `connection` and applies the
-/// commands to `db`.
+/// commands to `cache`.
 #[derive(Debug)]
 struct Handler {
     /// Shared database handle.
     ///
-    /// When a command is received from `connection`, it is applied with `db`.
+    /// When a command is received from `connection`, it is applied with `cache`.
     /// The implementation of the command is in the `cmd` module. Each command
-    /// will need to interact with `db` in order to complete the work.
-    db: Db,
+    /// will need to interact with `cache` in order to complete the work.
+    cache: Cache,
 
     /// The TCP connection decorated with the redis protocol encoder / decoder
     /// implemented using a buffered `TcpStream`.
@@ -140,7 +140,7 @@ pub async fn run(listener: TcpListener, shutdown: impl Future) {
     // Initialize the listener state
     let mut server = Listener {
         listener,
-        db_holder: DbDropGuard::new(),
+        cache_holder: CacheDropGuard::new(),
         limit_connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
         notify_shutdown,
         shutdown_complete_tx,
@@ -250,7 +250,7 @@ impl Listener {
             // Create the necessary per-connection handler state.
             let mut handler = Handler {
                 // Get a handle to the shared database.
-                db: self.db_holder.db(),
+                cache: self.cache_holder.cache(),
 
                 // Initialize the connection state. This allocates read/write
                 // buffers to perform redis protocol frame parsing.
@@ -373,7 +373,7 @@ impl Handler {
             // command to write response frames directly to the connection. In
             // the case of pub/sub, multiple frames may be send back to the
             // peer.
-            cmd.apply(&self.db, &mut self.connection, &mut self.shutdown)
+            cmd.apply(&self.cache, &mut self.connection, &mut self.shutdown)
                 .await?;
         }
 
