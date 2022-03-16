@@ -99,7 +99,7 @@ struct Entry {
     data: Bytes,
 
     /// Instant at which the entry expires and should be removed from the
-    /// database.
+    /// cache.
     expires_at: Option<Instant>,
 }
 
@@ -110,7 +110,7 @@ impl CacheDropGuard {
         CacheDropGuard { cache: Cache::new() }
     }
 
-    /// Get the shared database. Internally, this is an
+    /// Get the shared cache. Internally, this is an
     /// `Arc`, so a clone only increments the ref count.
     pub(crate) fn cache(&self) -> Cache {
         self.cache.clone()
@@ -300,7 +300,7 @@ impl Shared {
         let mut state = self.state.lock().unwrap();
 
         if state.shutdown {
-            // The database is shutting down. All handles to the shared state
+            // The cache is shutting down. All handles to the shared state
             // have dropped. The background task should exit.
             return None;
         }
@@ -330,7 +330,7 @@ impl Shared {
         None
     }
 
-    /// Returns `true` if the database is shutting down
+    /// Returns `true` if the cache is shutting down
     ///
     /// The `shutdown` flag is set when all `Cache` values have dropped, indicating
     /// that the shared state can no longer be accessed.

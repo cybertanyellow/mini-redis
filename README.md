@@ -17,7 +17,7 @@ fully featured alternatives instead.
 
 The primary goal of this project is teaching Tokio. Doing this requires a
 project with a wide range of features with a focus on implementation simplicity.
-Redis, an in-memory database, provides a wide range of features and uses a
+Redis, an in-memory cache, provides a wide range of features and uses a
 simple wire protocol. The wide range of features allows demonstrating many Tokio
 patterns in a "real world" context.
 

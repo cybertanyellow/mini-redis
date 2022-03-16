@@ -16,7 +16,7 @@ use tracing::{debug, error, info, instrument};
 /// which performs the TCP listening and initialization of per-connection state.
 #[derive(Debug)]
 struct Listener {
-    /// Shared database handle.
+    /// Shared cache handle.
     ///
     /// Contains the key / value store as well as the broadcast channels for
     /// pub/sub.
@@ -68,7 +68,7 @@ struct Listener {
 /// commands to `cache`.
 #[derive(Debug)]
 struct Handler {
-    /// Shared database handle.
+    /// Shared cache handle.
     ///
     /// When a command is received from `connection`, it is applied with `cache`.
     /// The implementation of the command is in the `cmd` module. Each command
@@ -249,7 +249,7 @@ impl Listener {
 
             // Create the necessary per-connection handler state.
             let mut handler = Handler {
-                // Get a handle to the shared database.
+                // Get a handle to the shared cache.
                 cache: self.cache_holder.cache(),
 
                 // Initialize the connection state. This allocates read/write
@@ -367,7 +367,7 @@ impl Handler {
             debug!(?cmd);
 
             // Perform the work needed to apply the command. This may mutate the
-            // database state as a result.
+            // cache state as a result.
             //
             // The connection is passed into the apply function which allows the
             // command to write response frames directly to the connection. In

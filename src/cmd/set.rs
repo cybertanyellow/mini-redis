@@ -126,7 +126,7 @@ impl Set {
     /// to execute a received command.
     #[instrument(skip(self, cache, dst))]
     pub(crate) async fn apply(self, cache: &Cache, dst: &mut Connection) -> crate::Result<()> {
-        // Set the value in the shared database state.
+        // Set the value in the shared cache state.
         cache.set(self.key, self.value, self.expire);
 
         // Create a success response and write it to `dst`.

@@ -62,7 +62,7 @@ impl Get {
     /// to execute a received command.
     #[instrument(skip(self, cache, dst))]
     pub(crate) async fn apply(self, cache: &Cache, dst: &mut Connection) -> crate::Result<()> {
-        // Get the value from the shared database state
+        // Get the value from the shared cache state
         let response = if let Some(value) = cache.get(&self.key) {
             // If a value is present, it is written to the client in "bulk"
             // format.
