@@ -67,6 +67,9 @@ struct State {
     /// and pub/sub. `flatbread` handles this by using a separate `HashMap`.
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
+    /// flatbread: persists policy for period insertion.
+    policies: HashMap<String, Policy>,
+
     /// Tracks key TTLs.
     ///
     /// A `BTreeMap` is used to maintain expirations sorted by when they expire.
@@ -103,6 +106,18 @@ struct Entry {
     expires_at: Option<Instant>,
 }
 
+#[derive(Debug)]
+struct Policy {
+    /// Uniquely identifies this entry.
+    ///id: u64,
+
+    /// Stored data
+    data: Bytes,
+
+    /// Duration at which period insertions should be made to the database.
+    period: Option<Duration>,
+}
+
 impl DbDropGuard {
     /// Create a new `DbHolder`, wrapping a `Db` instance. When this is dropped
     /// the `Db`'s purge task will be shut down.
@@ -132,6 +147,7 @@ impl Db {
             state: Mutex::new(State {
                 entries: HashMap::new(),
                 pub_sub: HashMap::new(),
+                policies: HashMap::new(),
                 expirations: BTreeMap::new(),
                 next_id: 0,
                 shutdown: false,
@@ -225,6 +241,25 @@ impl Db {
             // its state to reflect a new expiration.
             self.shared.background_task.notify_one();
         }
+    }
+
+    pub(crate) fn policy(&self, key: String, value: Bytes, period: Option<Duration>) {
+        let mut state = self.shared.state.lock().unwrap();
+
+        // Insert the entry into the `HashMap`.
+        let _prev = state.policies.insert(
+            key,
+            Policy {
+                //id,
+                data: value,
+                period,
+            },
+        );
+
+        // Release the mutex before notifying the background task. This helps
+        // reduce contention by avoiding the background task waking up only to
+        // be unable to acquire the mutex due to this function still holding it.
+        drop(state);
     }
 
     /// Returns a `Receiver` for the requested channel.

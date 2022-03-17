@@ -39,6 +39,19 @@ enum Command {
         #[structopt(parse(try_from_str = duration_from_ms_str))]
         expires: Option<Duration>,
     },
+    /// Policy to update by the string.
+    Policy {
+        /// Name of key to set
+        key: String,
+
+        /// Value to set.
+        #[structopt(parse(from_str = bytes_from_str))]
+        value: Bytes,
+
+        /// Update period specified amount of time
+        #[structopt(parse(try_from_str = duration_from_ms_str))]
+        period: Option<Duration>,
+    },
     ///  Publisher to send a message to a specific channel.
     Publish {
         /// Name of channel
@@ -105,6 +118,22 @@ async fn main() -> flatbread::Result<()> {
             expires: Some(expires),
         } => {
             client.set_expires(&key, value, expires).await?;
+            println!("OK");
+        }
+        Command::Policy {
+            key,
+            value,
+            period: None,
+        } => {
+            client.policy(&key, value).await?;
+            println!("OK");
+        }
+        Command::Policy {
+            key,
+            value,
+            period: Some(period),
+        } => {
+            client.policy_period(&key, value, period).await?;
             println!("OK");
         }
         Command::Publish { channel, message } => {

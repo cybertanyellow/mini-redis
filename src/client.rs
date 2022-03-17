@@ -2,7 +2,7 @@
 //!
 //! Provides an async connect and methods for issuing the supported commands.
 
-use crate::cmd::{Get, Publish, Set, Subscribe, Unsubscribe};
+use crate::cmd::{Get, Publish, Set, Policy, Subscribe, Unsubscribe};
 use crate::{Connection, Frame};
 
 use async_stream::try_stream;
@@ -234,6 +234,44 @@ impl Client {
             frame => Err(frame.to_error()),
         }
     }
+
+    #[instrument(skip(self))]
+    pub async fn policy(&mut self, key: &str, value: Bytes) -> crate::Result<()> {
+        // Create a `Set` command and pass it to `set_cmd`. A separate method is
+        // used to set a value with an expiration. The common parts of both
+        // functions are implemented by `set_cmd`.
+        self.policy_cmd(Policy::new(key, value, None)).await
+    }
+    #[instrument(skip(self))]
+    pub async fn policy_period(
+        &mut self,
+        key: &str,
+        value: Bytes,
+        period: Duration,
+    ) -> crate::Result<()> {
+        // Create a `Set` command and pass it to `set_cmd`. A separate method is
+        // used to set a value with an expiration. The common parts of both
+        // functions are implemented by `set_cmd`.
+        self.policy_cmd(Policy::new(key, value, Some(period))).await
+    }
+    async fn policy_cmd(&mut self, cmd: Policy) -> crate::Result<()> {
+        // Convert the `Policy` command into a frame
+        let frame = cmd.into_frame();
+
+        debug!(request = ?frame);
+
+        // Write the frame to the socket. This writes the full frame to the
+        // socket, waiting if necessary.
+        self.connection.write_frame(&frame).await?;
+
+        // Wait for the response from the server. On success, the server
+        // responds simply with `OK`. Any other response indicates an error.
+        match self.read_response().await? {
+            Frame::Simple(response) if response == "OK" => Ok(()),
+            frame => Err(frame.to_error()),
+        }
+    }
+
 
     /// Posts `message` to the given `channel`.
     ///
