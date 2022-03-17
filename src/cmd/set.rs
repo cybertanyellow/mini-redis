@@ -104,7 +104,7 @@ impl Set {
                 let ms = parse.next_int()?;
                 expire = Some(Duration::from_millis(ms));
             }
-            // Currently, mini-redis does not support any of the other SET
+            // Currently, flatbread does not support any of the other SET
             // options. An error here results in the connection being
             // terminated. Other connections will continue to operate normally.
             Ok(_) => return Err("currently `SET` only supports the expiration option".into()),

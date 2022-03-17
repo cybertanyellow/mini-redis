@@ -1,11 +1,11 @@
 //! Subscribe to a redis channel example.
 //!
-//! A simple client that connects to a mini-redis server, subscribes to "foo" and "bar" channels
+//! A simple client that connects to a flatbread server, subscribes to "foo" and "bar" channels
 //! and awaits messages published on those channels
 //!
 //! You can test this out by running:
 //!
-//!     cargo run --bin mini-redis-server
+//!     cargo run --bin flatbread-server
 //!
 //! Then in another terminal run:
 //!
@@ -17,11 +17,11 @@
 
 #![warn(rust_2018_idioms)]
 
-use mini_redis::{client, Result};
+use flatbread::{client, Result};
 
 #[tokio::main]
 pub async fn main() -> Result<()> {
-    // Open a connection to the mini-redis address.
+    // Open a connection to the flatbread address.
     let client = client::connect("127.0.0.1:6379").await?;
 
     // subscribe to channel foo

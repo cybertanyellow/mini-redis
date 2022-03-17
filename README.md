@@ -1,13 +1,13 @@
-# mini-redis
+# flatbread
 
-`mini-redis` is an incomplete, idiomatic implementation of a
+`flatbread` is an incomplete, idiomatic implementation of a
 [Redis](https://redis.io) client and server built with
 [Tokio](https://tokio.rs).
 
 The intent of this project is to provide a larger example of writing a Tokio
 application.
 
-**Disclaimer** Please don't use mini-redis in production. This project is
+**Disclaimer** Please don't use flatbread in production. This project is
 intended to be a learning resource, and omits various parts of the Redis
 protocol because implementing them would not introduce any new concepts. We will
 not add new features because you need them in your project — use one of the
@@ -35,7 +35,7 @@ for interacting with the server.
 Start the server:
 
 ```
-RUST_LOG=debug cargo run --bin mini-redis-server
+RUST_LOG=debug cargo run --bin flatbread-server
 ```
 
 The [`tracing`](https://github.com/tokio-rs/tracing) crate is used to provide structured logs.
@@ -54,14 +54,14 @@ Additionally, a CLI client is provided to run arbitrary commands from the
 terminal. With the server running, the following works:
 
 ```
-cargo run --bin mini-redis-cli set foo bar
+cargo run --bin flatbread-cli set foo bar
 
-cargo run --bin mini-redis-cli get foo
+cargo run --bin flatbread-cli get foo
 ```
 
 ## Supported commands
 
-`mini-redis` currently supports the following commands.
+`flatbread` currently supports the following commands.
 
 * [GET](https://redis.io/commands/get)
 * [SET](https://redis.io/commands/set)
@@ -143,7 +143,7 @@ time is mocked out using Tokio's testing utilities.
 
 ## Contributing
 
-Contributions to `mini-redis` are welcome. Keep in mind, the goal of the project
+Contributions to `flatbread` are welcome. Keep in mind, the goal of the project
 is **not** to reach feature parity with real Redis, but to demonstrate
 asynchronous Rust patterns with Tokio.
 
@@ -162,5 +162,5 @@ This project is licensed under the [MIT license](LICENSE).
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in `mini-redis` by you, shall be licensed as MIT, without any
+for inclusion in `flatbread` by you, shall be licensed as MIT, without any
 additional terms or conditions.
