@@ -5,6 +5,9 @@ use bytes::Bytes;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tracing::debug;
+use tokio::sync::mpsc;
+use std::env;
+use sqlx::sqlite::SqlitePool;
 
 /// A wrapper around a `Db` instance. This exists to allow orderly cleanup
 /// of the `Db` by signalling the background purge task to shut down when
@@ -69,6 +72,8 @@ struct State {
 
     /// flatbread: persists policy for period insertion.
     policies: HashMap<String, Policy>,
+    //policy_rx: mpsc::Receiver<()>,
+    request: mpsc::Sender<(String, Bytes)>,
 
     /// Tracks key TTLs.
     ///
@@ -143,6 +148,7 @@ impl Db {
     /// Create a new, empty, `Db` instance. Allocates shared state and spawns a
     /// background task to manage key expiration.
     pub(crate) fn new() -> Db {
+        let (tx, rx) = mpsc::channel(32);
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 entries: HashMap::new(),
@@ -151,12 +157,15 @@ impl Db {
                 expirations: BTreeMap::new(),
                 next_id: 0,
                 shutdown: false,
+                //policy_rx: rx,
+                request: tx,
             }),
             background_task: Notify::new(),
         });
 
         // Start the background task.
         tokio::spawn(purge_expired_tasks(shared.clone()));
+        tokio::spawn(period_policy_tasks(shared.clone(), rx));
 
         Db { shared }
     }
@@ -210,6 +219,9 @@ impl Db {
             state.expirations.insert((when, id), key.clone());
             when
         });
+
+        //let _ = state.request.send("hello".to_string());
+        tokio::spawn(request_tx_task(state.request.clone(), ("set".to_string(), value.clone())));
 
         // Insert the entry into the `HashMap`.
         let prev = state.entries.insert(
@@ -300,6 +312,8 @@ impl Db {
     pub(crate) fn publish(&self, key: &str, value: Bytes) -> usize {
         let state = self.shared.state.lock().unwrap();
 
+        tokio::spawn(request_tx_task(state.request.clone(), ("publish".to_string(), value.clone())));
+
         state
             .pub_sub
             .get(key)
@@ -372,6 +386,43 @@ impl Shared {
     fn is_shutdown(&self) -> bool {
         self.state.lock().unwrap().shutdown
     }
+
+    /*fn period_policy_keys(&self) -> Option<Instant> {
+        let mut state = self.state.lock().unwrap();
+
+        if state.shutdown {
+            // The database is shutting down. All handles to the shared state
+            // have dropped. The background task should exit.
+            return None;
+        }
+
+        // This is needed to make the borrow checker happy. In short, `lock()`
+        // returns a `MutexGuard` and not a `&mut State`. The borrow checker is
+        // not able to see "through" the mutex guard and determine that it is
+        // safe to access both `state.expirations` and `state.entries` mutably,
+        // so we get a "real" mutable reference to `State` outside of the loop.
+        let state = &mut *state;
+
+        // Find all keys scheduled to expire **before** now.
+        /*let now = Instant::now();
+
+        while let Some((&(when, id), key)) = state.expirations.iter().next() {
+            if when > now {
+                // Done purging, `when` is the instant at which the next key
+                // expires. The worker task will wait until this instant.
+                return Some(when);
+            }
+
+            // The key expired, remove it
+            state.entries.remove(key);
+            state.expirations.remove(&(when, id));
+        }*/
+        let period_at = expire.map(|duration| {
+            // `Instant` at which the key expires.
+            let when = Instant::now() + duration;
+
+        None
+    } */
 }
 
 impl State {
@@ -410,4 +461,38 @@ async fn purge_expired_tasks(shared: Arc<Shared>) {
     }
 
     debug!("Purge background task shut down")
+}
+
+async fn request_tx_task(ch: mpsc::Sender<(String, Bytes)>, msg: (String, Bytes)) {
+    ch.send(msg).await.unwrap();
+}
+
+async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, Bytes)>) {
+    let mut interval_500ms = time::interval(time::Duration::from_millis(500));
+    let mut interval_1s = time::interval(time::Duration::from_millis(1000));
+    let url: String = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://:memory:".to_string());
+    let pool: SqlitePool = SqlitePool::connect(&url).await.unwrap();
+
+    let mut conn = pool.acquire().await.unwrap();
+
+    // If the shutdown flag is set, then the task should exit.
+    while !shared.is_shutdown() {
+        tokio::select! {
+            _ = interval_500ms.tick() => {
+                let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#,
+                100.0, 999.9).execute(&mut conn)
+                    .await.unwrap()
+                    .last_insert_rowid();
+            }
+            _ = interval_1s.tick() => {
+                sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
+                33.3, 44.4, 55.5, 66.6).execute(&mut conn).await.unwrap();
+            }
+            Some((cmd, val)) = request.recv() => {
+                println!("request {} cmd value {:#?}", cmd, val.to_ascii_lowercase());
+            }
+        }
+    }
+
+    debug!("Policy period update/insert background task shut down")
 }
