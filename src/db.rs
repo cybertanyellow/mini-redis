@@ -8,6 +8,7 @@ use tracing::debug;
 use tokio::sync::mpsc;
 use std::env;
 use sqlx::sqlite::SqlitePool;
+use std::str;
 
 /// A wrapper around a `Db` instance. This exists to allow orderly cleanup
 /// of the `Db` by signalling the background purge task to shut down when
@@ -479,8 +480,15 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
     while !shared.is_shutdown() {
         tokio::select! {
             _ = interval_500ms.tick() => {
+                let mut spd: f64 = 100.0;
+                {
+                    let state = shared.state.lock().unwrap();
+                    if let Some(value) = state.entries.get("velocity").map(|entry| entry.data.clone()) {
+                        spd = str::from_utf8(&value).unwrap().parse::<f64>().unwrap();
+                    }
+                }
                 let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#,
-                100.0, 999.9).execute(&mut conn)
+                spd, 999.9).execute(&mut conn)
                     .await.unwrap()
                     .last_insert_rowid();
             }
