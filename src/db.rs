@@ -4,11 +4,15 @@ use tokio::time::{self, Duration, Instant};
 use bytes::Bytes;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use tracing::debug;
+use tracing::{debug, error};
 use tokio::sync::mpsc;
 use std::env;
 use sqlx::sqlite::SqlitePool;
+use sqlx::types::chrono::{DateTime, Utc, NaiveDate};
 use std::str;
+use serde::{Deserialize, Serialize};
+//use chrono::prelude::*;
+use chrono::serde::{/*ts_milliseconds, */ts_seconds};
 
 /// A wrapper around a `Db` instance. This exists to allow orderly cleanup
 /// of the `Db` by signalling the background purge task to shut down when
@@ -72,9 +76,9 @@ struct State {
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
     /// flatbread: persists policy for period insertion.
-    policies: HashMap<String, Policy>,
+    //policies: HashMap<String, Policy>,
     //policy_rx: mpsc::Receiver<()>,
-    request: mpsc::Sender<(String, Bytes)>,
+    request: mpsc::Sender<(String, String, Bytes)>,
 
     /// Tracks key TTLs.
     ///
@@ -112,17 +116,17 @@ struct Entry {
     expires_at: Option<Instant>,
 }
 
-#[derive(Debug)]
+/*#[derive(Debug)]
 struct Policy {
     /// Uniquely identifies this entry.
     ///id: u64,
 
     /// Stored data
-    data: Bytes,
+    _data: Bytes,
 
     /// Duration at which period insertions should be made to the database.
-    period: Option<Duration>,
-}
+    _period: Option<Duration>,
+}*/
 
 impl DbDropGuard {
     /// Create a new `DbHolder`, wrapping a `Db` instance. When this is dropped
@@ -154,7 +158,7 @@ impl Db {
             state: Mutex::new(State {
                 entries: HashMap::new(),
                 pub_sub: HashMap::new(),
-                policies: HashMap::new(),
+                //policies: HashMap::new(),
                 expirations: BTreeMap::new(),
                 next_id: 0,
                 shutdown: false,
@@ -222,7 +226,7 @@ impl Db {
         });
 
         //let _ = state.request.send("hello".to_string());
-        tokio::spawn(request_tx_task(state.request.clone(), ("set".to_string(), value.clone())));
+        tokio::spawn(request_tx_task(state.request.clone(), ("set".to_string(), key.clone(), value.clone())));
 
         // Insert the entry into the `HashMap`.
         let prev = state.entries.insert(
@@ -256,7 +260,7 @@ impl Db {
         }
     }
 
-    pub(crate) fn policy(&self, key: String, value: Bytes, period: Option<Duration>) {
+    /*pub(crate) fn policy(&self, key: String, value: Bytes, period: Option<Duration>) {
         let mut state = self.shared.state.lock().unwrap();
 
         // Insert the entry into the `HashMap`.
@@ -273,7 +277,7 @@ impl Db {
         // reduce contention by avoiding the background task waking up only to
         // be unable to acquire the mutex due to this function still holding it.
         drop(state);
-    }
+    }*/
 
     /// Returns a `Receiver` for the requested channel.
     ///
@@ -313,7 +317,7 @@ impl Db {
     pub(crate) fn publish(&self, key: &str, value: Bytes) -> usize {
         let state = self.shared.state.lock().unwrap();
 
-        tokio::spawn(request_tx_task(state.request.clone(), ("publish".to_string(), value.clone())));
+        tokio::spawn(request_tx_task(state.request.clone(), ("publish".to_string(), key.to_string(), value.clone())));
 
         state
             .pub_sub
@@ -464,11 +468,105 @@ async fn purge_expired_tasks(shared: Arc<Shared>) {
     debug!("Purge background task shut down")
 }
 
-async fn request_tx_task(ch: mpsc::Sender<(String, Bytes)>, msg: (String, Bytes)) {
+async fn request_tx_task(ch: mpsc::Sender<(String, String, Bytes)>, msg: (String, String, Bytes)) {
     ch.send(msg).await.unwrap();
 }
 
-async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, Bytes)>) {
+#[derive(Serialize, Deserialize, Debug)]
+enum DriverAction {
+    Driving(i32),
+    Stopping(i32),
+    Standby(i32),
+    Resting(i32),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Calibration {
+    user: String,
+    odo_after: f64,
+    odo_unit: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TimeDate {
+    #[serde(with = "ts_seconds")]
+    timestamp_after: DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct VehicleUnit {
+    manufacture_name: String,
+    manufacture_address: String,
+    serial_number: String,
+    sw_version: String,
+    #[serde(with = "ts_seconds")]
+    install_timestamp: DateTime<Utc>,
+    manufacture_date: NaiveDate,
+    certification_number: String,
+    car_number: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Error {
+    fault_type: Vec<u8>,
+    //#[serde(with = "ts_seconds")]
+    fault_start: Option<DateTime<Utc>>,
+    #[serde(with = "ts_seconds")]
+    fault_end: DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Event {
+    event_type: Vec<u8>,
+    //#[serde(with = "ts_seconds")]
+    event_start: Option<DateTime<Utc>>,
+    //#[serde(with = "ts_seconds")]
+    event_end: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Driver {
+    account: String,
+    //action: DriverAction,
+    action: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct TravelThreshold {
+    #[serde(with = "ts_seconds")]
+    timestamp_before: DateTime<Utc>,
+    #[serde(with = "ts_seconds")]
+    timestamp_after: DateTime<Utc>,
+    threshold_before: f32,
+    threshold_after: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct RestThreshold {
+    #[serde(with = "ts_seconds")]
+    timestamp_before: DateTime<Utc>,
+    #[serde(with = "ts_seconds")]
+    timestamp_after: DateTime<Utc>,
+    threshold_before: f32,
+    threshold_after: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Velocity {
+    speed: f32,
+    odo: Option<f64>,
+    timestamp: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Location {
+    logitude: f64,
+    latitude: f64,
+    altitude: f64,
+    speed_avg: f32,
+}
+
+async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, String, Bytes)>) {
     let mut interval_500ms = time::interval(time::Duration::from_millis(500));
     let mut interval_1s = time::interval(time::Duration::from_millis(1000));
     let url: String = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://:memory:".to_string());
@@ -480,7 +578,7 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
     while !shared.is_shutdown() {
         tokio::select! {
             _ = interval_500ms.tick() => {
-                let mut spd: f64 = 100.0;
+                /*let mut spd: f64 = 100.0;
                 {
                     let state = shared.state.lock().unwrap();
                     if let Some(value) = state.entries.get("velocity").map(|entry| entry.data.clone()) {
@@ -490,14 +588,107 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
                 let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#,
                 spd, 999.9).execute(&mut conn)
                     .await.unwrap()
+                    .last_insert_rowid();*/
+                let mut velocity = Velocity {
+                    speed: 0.0,
+                    odo: None,
+                    timestamp: None,
+                };
+                {
+                    let state = shared.state.lock().unwrap();
+                    if let Some(value) = state.entries.get("velocity").map(|entry| entry.data.clone()) {
+                        //spd = str::from_utf8(&value).unwrap().parse::<Velocity>().unwrap();
+                        velocity = serde_json::from_slice(&value).unwrap();
+                    }
+                }
+                let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#,
+                velocity.speed, velocity.odo).execute(&mut conn)
+                    .await.unwrap()
                     .last_insert_rowid();
             }
             _ = interval_1s.tick() => {
+                /*sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
+                33.3, 44.4, 55.5, 66.6).execute(&mut conn).await.unwrap();*/
+                let mut location = Location {
+                    logitude: 0.0,
+                    latitude: 0.0,
+                    altitude: 0.0,
+                    speed_avg: 0.0,
+                };
+                {
+                    let state = shared.state.lock().unwrap();
+                    if let Some(value) = state.entries.get("location").map(|entry| entry.data.clone()) {
+                        if let Ok(json) = serde_json::from_slice(&value) {
+                            location = json;
+                        }
+                    }
+                }
                 sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
-                33.3, 44.4, 55.5, 66.6).execute(&mut conn).await.unwrap();
+                location.logitude, location.latitude, location.altitude, location.speed_avg).execute(&mut conn).await.unwrap();
             }
-            Some((cmd, val)) = request.recv() => {
-                println!("request {} cmd value {:#?}", cmd, val.to_ascii_lowercase());
+            Some((cmd, key, val)) = request.recv() => {
+                debug!("cmd-{} key-{} value {:#?}", cmd, key, val.to_ascii_lowercase());
+
+                if key == "driver" {
+                    let driver: Driver = serde_json::from_slice(&val).unwrap();
+                    println!("driver {:?}", driver);
+                    let _did = sqlx::query!(r#"INSERT INTO driver ( account, action ) VALUES ( ?1, ?2 )"#,
+                    driver.account, driver.action).execute(&mut conn).await.unwrap()
+                        .last_insert_rowid();
+                }
+                if key == "calibration" {
+                    let cal: Calibration = serde_json::from_slice(&val).unwrap();
+                    println!("calibration {:?}", cal);
+                    let _did = sqlx::query!(r#"INSERT INTO calibration ( user, odo_after, odo_unit ) VALUES ( ?1, ?2, ?3 )"#,
+                    cal.user, cal.odo_after, cal.odo_unit).execute(&mut conn).await.unwrap()
+                        .last_insert_rowid();
+                }
+                if key == "time-date" {
+                    let tm: TimeDate = serde_json::from_slice(&val).unwrap();
+                    println!("date-time {:?}", tm);
+                    let _did = sqlx::query!(r#"INSERT INTO time_date ( timestamp_after ) VALUES ( ?1 )"#,
+                    tm.timestamp_after).execute(&mut conn).await.unwrap()
+                        .last_insert_rowid();
+                }
+                if key == "event" {
+                    if let Ok(event) = serde_json::from_slice::<Event>(&val) {
+                        debug!("event {:?}", event);
+
+                        match sqlx::query!(r#"INSERT INTO event (event_type, event_start, event_end) VALUES ( ?1, ?2, ?3)"#,
+                        event.event_type, event.event_start, event.event_end).execute(&mut conn).await {
+                            Ok(_) => { debug!("INSERT event - {:?} OK", event)},
+                            Err(e) => { error!("INSERT event error-{:?}", e)},
+                        }
+                    }
+                    else {
+                        error!("event format invalid - {:?}", val);
+                    }
+                }
+                /*if key == "velocity" {
+                    let vel: Velocity = serde_json::from_slice(&val).unwrap();
+                    println!("velocity {:?}", vel);
+                    if let Some(ts) = vel.timestamp {
+                        if let Some(odo) = vel.odo {
+                            let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo, timestamp ) VALUES ( ?1, ?2, ?3 )"#,
+                            vel.speed, odo, ts).execute(&mut conn).await.unwrap()
+                                .last_insert_rowid();
+                        } else {
+                            let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, timestamp ) VALUES ( ?1, ?2 )"#,
+                            vel.speed, ts).execute(&mut conn).await.unwrap()
+                                .last_insert_rowid();
+                        }
+                    } else {
+                        if let Some(odo) = vel.odo {
+                            let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#,
+                            vel.speed, odo).execute(&mut conn).await.unwrap()
+                                .last_insert_rowid();
+                        } else {
+                            let _did = sqlx::query!(r#"INSERT INTO velocity ( speed ) VALUES ( ?1 )"#,
+                            vel.speed).execute(&mut conn).await.unwrap()
+                                .last_insert_rowid();
+                        }
+                    }
+                }*/
             }
         }
     }

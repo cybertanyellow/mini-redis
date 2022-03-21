@@ -167,3 +167,5 @@ fn duration_from_ms_str(src: &str) -> Result<Duration, ParseIntError> {
 fn bytes_from_str(src: &str) -> Bytes {
     Bytes::from(src.to_string())
 }
+
+// cargo run --bin flatbread-cli -- set event '{"event_type":[1,2],"event_end":"2022-03-22T16:29:04.644008111Z"}'
