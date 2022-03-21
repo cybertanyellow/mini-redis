@@ -11,6 +11,7 @@ use flatbread::{server, DEFAULT_PORT};
 use structopt::StructOpt;
 use tokio::net::TcpListener;
 use tokio::signal;
+use dotenv::dotenv;
 
 #[tokio::main]
 pub async fn main() -> flatbread::Result<()> {
@@ -18,6 +19,7 @@ pub async fn main() -> flatbread::Result<()> {
     // see https://docs.rs/tracing for more info
     tracing_subscriber::fmt::try_init()?;
 
+    dotenv().ok();
     let cli = Cli::from_args();
     let port = cli.port.as_deref().unwrap_or(DEFAULT_PORT);
 
