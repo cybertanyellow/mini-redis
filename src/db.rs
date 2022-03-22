@@ -4,7 +4,7 @@ use tokio::time::{self, Duration, Instant};
 use bytes::Bytes;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use tokio::sync::mpsc;
 use std::env;
 use sqlx::sqlite::SqlitePool;
@@ -481,20 +481,21 @@ enum DriverAction {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Calibration {
+struct FbCalibration {
     user: String,
     odo_after: f64,
     odo_unit: f32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct TimeDate {
-    #[serde(with = "ts_seconds")]
-    timestamp_after: DateTime<Utc>,
+struct FbTimeDate {
+    timestamp_before: Option<DateTime<Utc>>,
+    //#[serde(with = "ts_seconds")]
+    timestamp_after: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct VehicleUnit {
+struct FbVehicleUnit {
     manufacture_name: String,
     manufacture_address: String,
     serial_number: String,
@@ -507,17 +508,17 @@ struct VehicleUnit {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Error {
-    fault_type: Vec<u8>,
+struct FbError {
+    fault_type: u16,
     //#[serde(with = "ts_seconds")]
     fault_start: Option<DateTime<Utc>>,
-    #[serde(with = "ts_seconds")]
-    fault_end: DateTime<Utc>,
+    //#[serde(with = "ts_seconds")]
+    fault_end: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Event {
-    event_type: Vec<u8>,
+struct FbEvent {
+    event_type: u16,
     //#[serde(with = "ts_seconds")]
     event_start: Option<DateTime<Utc>>,
     //#[serde(with = "ts_seconds")]
@@ -525,14 +526,14 @@ struct Event {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Driver {
+struct FbDriver {
     account: String,
     //action: DriverAction,
     action: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct TravelThreshold {
+struct FbTravelThreshold {
     #[serde(with = "ts_seconds")]
     timestamp_before: DateTime<Utc>,
     #[serde(with = "ts_seconds")]
@@ -542,7 +543,7 @@ struct TravelThreshold {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct RestThreshold {
+struct FbRestThreshold {
     #[serde(with = "ts_seconds")]
     timestamp_before: DateTime<Utc>,
     #[serde(with = "ts_seconds")]
@@ -552,14 +553,14 @@ struct RestThreshold {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Velocity {
+struct FbVelocity {
     speed: f32,
     odo: Option<f64>,
     timestamp: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct Location {
+struct FbLocation {
     logitude: f64,
     latitude: f64,
     altitude: f64,
@@ -574,22 +575,15 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
 
     let mut conn = pool.acquire().await.unwrap();
 
+    let mut velocity_id: Option<i64> = None;
+    let mut location_id: Option<i64> = None;
+    let mut driver_id: Option<i64> = None;
+
     // If the shutdown flag is set, then the task should exit.
     while !shared.is_shutdown() {
         tokio::select! {
             _ = interval_500ms.tick() => {
-                /*let mut spd: f64 = 100.0;
-                {
-                    let state = shared.state.lock().unwrap();
-                    if let Some(value) = state.entries.get("velocity").map(|entry| entry.data.clone()) {
-                        spd = str::from_utf8(&value).unwrap().parse::<f64>().unwrap();
-                    }
-                }
-                let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#,
-                spd, 999.9).execute(&mut conn)
-                    .await.unwrap()
-                    .last_insert_rowid();*/
-                let mut velocity = Velocity {
+                let mut velocity = FbVelocity {
                     speed: 0.0,
                     odo: None,
                     timestamp: None,
@@ -597,19 +591,23 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
                 {
                     let state = shared.state.lock().unwrap();
                     if let Some(value) = state.entries.get("velocity").map(|entry| entry.data.clone()) {
-                        //spd = str::from_utf8(&value).unwrap().parse::<Velocity>().unwrap();
+                        //spd = str::from_utf8(&value).unwrap().parse::<FbVelocity>().unwrap();
                         velocity = serde_json::from_slice(&value).unwrap();
                     }
                 }
-                let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#,
-                velocity.speed, velocity.odo).execute(&mut conn)
-                    .await.unwrap()
-                    .last_insert_rowid();
+                match sqlx::query!(r#"INSERT INTO velocity ( speed, odo, location_id, driver_id ) VALUES ( ?1, ?2, ?3, ?4 )"#,
+                velocity.speed, velocity.odo, location_id, driver_id).execute(&mut conn).await {
+                    Ok(r) => {
+                        velocity_id = Some(r.last_insert_rowid());
+                        debug!("INSERT velocity with {:?} OK {:?}", velocity, velocity_id);
+                    }
+                    Err(e) => {
+                        error!("INSERT velocity with {:?} fail {}", velocity, e);
+                    }
+                }
             }
             _ = interval_1s.tick() => {
-                /*sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
-                33.3, 44.4, 55.5, 66.6).execute(&mut conn).await.unwrap();*/
-                let mut location = Location {
+                let mut location = FbLocation {
                     logitude: 0.0,
                     latitude: 0.0,
                     altitude: 0.0,
@@ -623,72 +621,138 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
                         }
                     }
                 }
-                sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
-                location.logitude, location.latitude, location.altitude, location.speed_avg).execute(&mut conn).await.unwrap();
+                match sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
+                location.logitude, location.latitude, location.altitude, location.speed_avg).execute(&mut conn).await {
+                    Ok(r) => {
+                        location_id = Some(r.last_insert_rowid());
+                        debug!("INSERT location with {:?} OK {:?}", location, location_id);
+                    }
+                    Err(e) => {
+                        error!("INSERT location with {:?} fail {}", location, e);
+                    }
+                }
             }
             Some((cmd, key, val)) = request.recv() => {
                 debug!("cmd-{} key-{} value {:#?}", cmd, key, val.to_ascii_lowercase());
 
                 if key == "driver" {
-                    let driver: Driver = serde_json::from_slice(&val).unwrap();
+                    let driver: FbDriver = serde_json::from_slice(&val).unwrap();
                     println!("driver {:?}", driver);
-                    let _did = sqlx::query!(r#"INSERT INTO driver ( account, action ) VALUES ( ?1, ?2 )"#,
-                    driver.account, driver.action).execute(&mut conn).await.unwrap()
-                        .last_insert_rowid();
+                    match sqlx::query!(r#"INSERT INTO driver ( account, action ) VALUES ( ?1, ?2 )"#,
+                    driver.account, driver.action).execute(&mut conn).await {
+                        Ok(r) => {
+                            debug!("INSERT driver with {:?} OK {:?}", driver, driver_id);
+                            if driver.action == 1 || driver.action == 2 {
+                                driver_id = Some(r.last_insert_rowid());
+                            }
+                        }
+                        Err(e) => {
+                            error!("INSERT driver with {:?} fail {}", driver, e);
+                        }
+                    }
                 }
                 if key == "calibration" {
-                    let cal: Calibration = serde_json::from_slice(&val).unwrap();
+                    /* TODO change odo/mileage */
+                    let cal: FbCalibration = serde_json::from_slice(&val).unwrap();
                     println!("calibration {:?}", cal);
                     let _did = sqlx::query!(r#"INSERT INTO calibration ( user, odo_after, odo_unit ) VALUES ( ?1, ?2, ?3 )"#,
                     cal.user, cal.odo_after, cal.odo_unit).execute(&mut conn).await.unwrap()
                         .last_insert_rowid();
                 }
                 if key == "time-date" {
-                    let tm: TimeDate = serde_json::from_slice(&val).unwrap();
-                    println!("date-time {:?}", tm);
-                    let _did = sqlx::query!(r#"INSERT INTO time_date ( timestamp_after ) VALUES ( ?1 )"#,
-                    tm.timestamp_after).execute(&mut conn).await.unwrap()
-                        .last_insert_rowid();
+                    /* TODO change system time */
+                    let tm: FbTimeDate = serde_json::from_slice(&val).unwrap();
+                    //println!("date-time {:?}", tm);
+                    match (tm.timestamp_before, tm.timestamp_after) {
+                        (Some(before), Some(after)) => {
+                            match sqlx::query!(r#"INSERT INTO time_date ( timestamp_before, timestamp_after ) VALUES ( ?1, ?2 )"#,
+                            before, after).execute(&mut conn).await {
+                                Ok(r) => { info!("INSERT date-time {:?} OK ID-{}", tm, r.last_insert_rowid()); },
+                                Err(e) => { info!("INSERT date-time {:?} FAILED {:?}", tm, e); /*TODO*/},
+                            }
+                        }
+                        (Some(before), None) => {
+                            match sqlx::query!(r#"INSERT INTO time_date ( timestamp_before ) VALUES ( ?1 )"#,
+                            before).execute(&mut conn).await {
+                                Ok(r) => { info!("INSERT date-time {:?} OK ID-{}", tm, r.last_insert_rowid()); },
+                                Err(e) => { info!("INSERT date-time {:?} FAILED {:?}", tm, e); /*TODO*/},
+                            }
+                        }
+                        (None, Some(after)) => {
+                            match sqlx::query!(r#"UPDATE time_date SET timestamp_after = ?1 WHERE timestamp_after IS NULL"#,
+                            after).execute(&mut conn).await {
+                                Ok(r) => { info!("UPDATE date-time {:?} OK ID-{}", tm, r.last_insert_rowid()); },
+                                Err(e) => { info!("UPDATE date-time {:?} FAILED {:?}", tm, e); /*TODO*/},
+                            }
+                        }
+                        (None, None) => {
+                            match sqlx::query!(r#"INSERT INTO time_date ( timestamp_after ) VALUES ( NULL )"#).execute(&mut conn).await {
+                                Ok(r) => { info!("INSERT date-time {:?} OK ID-{}", tm, r.last_insert_rowid()); },
+                                Err(e) => { info!("INSERT date-time {:?} FAILED {:?}", tm, e); /*TODO*/},
+                            }
+                        }
+                    }
+
                 }
                 if key == "event" {
-                    if let Ok(event) = serde_json::from_slice::<Event>(&val) {
+                    if let Ok(event) = serde_json::from_slice::<FbEvent>(&val) {
                         debug!("event {:?}", event);
 
-                        match sqlx::query!(r#"INSERT INTO event (event_type, event_start, event_end) VALUES ( ?1, ?2, ?3)"#,
-                        event.event_type, event.event_start, event.event_end).execute(&mut conn).await {
-                            Ok(_) => { debug!("INSERT event - {:?} OK", event)},
-                            Err(e) => { error!("INSERT event error-{:?}", e)},
+                        if event.event_end.is_some() {
+                            match sqlx::query!(r#"UPDATE event SET event_end = ?2 WHERE event_type = ?1"#,
+                                               event.event_type, event.event_end).execute(&mut conn).await {
+                                Ok(_) => { debug!("UPDATE event {:?} OK", event); },
+                                Err(e) => { debug!("UPDATE event {:?} FAILED {:?}", event, e); /*TODO*/},
+                            }
+                        } else {
+                            match sqlx::query!(r#"INSERT INTO event (event_type, velocity_id) VALUES ( ?1, ?2)"#,
+                            event.event_type, velocity_id).execute(&mut conn).await {
+                                Ok(_) => { debug!("INSERT event - {:?} OK", event)},
+                                Err(e) => { error!("INSERT event error-{:?}", e)},
+                            }
                         }
                     }
                     else {
                         error!("event format invalid - {:?}", val);
                     }
                 }
-                /*if key == "velocity" {
-                    let vel: Velocity = serde_json::from_slice(&val).unwrap();
-                    println!("velocity {:?}", vel);
-                    if let Some(ts) = vel.timestamp {
-                        if let Some(odo) = vel.odo {
-                            let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo, timestamp ) VALUES ( ?1, ?2, ?3 )"#,
-                            vel.speed, odo, ts).execute(&mut conn).await.unwrap()
-                                .last_insert_rowid();
-                        } else {
-                            let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, timestamp ) VALUES ( ?1, ?2 )"#,
-                            vel.speed, ts).execute(&mut conn).await.unwrap()
-                                .last_insert_rowid();
-                        }
-                    } else {
-                        if let Some(odo) = vel.odo {
-                            let _did = sqlx::query!(r#"INSERT INTO velocity ( speed, odo ) VALUES ( ?1, ?2 )"#,
-                            vel.speed, odo).execute(&mut conn).await.unwrap()
-                                .last_insert_rowid();
-                        } else {
-                            let _did = sqlx::query!(r#"INSERT INTO velocity ( speed ) VALUES ( ?1 )"#,
-                            vel.speed).execute(&mut conn).await.unwrap()
-                                .last_insert_rowid();
+                if key == "error" {
+                    if let Ok(error) = serde_json::from_slice::<FbError>(&val) {
+                        match (error.fault_start, error.fault_end) {
+                            (Some(fault_start), Some(fault_end)) => {
+                                match sqlx::query!(r#"INSERT INTO error ( fault_type, fault_start, fault_end, velocity_id ) VALUES ( ?1, ?2, ?3, ?4)"#,
+                                error.fault_type, fault_start, fault_end, velocity_id).execute(&mut conn).await {
+                                    Ok(_) => { info!("INSERT error {:?} OK", error); },
+                                    Err(e) => { error!("INSERT error {:?} FAILED {:?}", error, e); /*TODO*/},
+                                }
+                            }
+                            (Some(fault_start), None) => {
+                                match sqlx::query!(r#"INSERT INTO error ( fault_type, fault_start, velocity_id ) VALUES ( ?1, ?2, ?3 )"#,
+                                error.fault_type, fault_start, velocity_id).execute(&mut conn).await {
+                                    Ok(_) => { info!("INSERT error {:?} OK", error); },
+                                    Err(e) => { error!("INSERT error {:?} FAILED {:?}", error, e); /*TODO*/},
+                                }
+                            }
+                            (None, Some(fault_end)) => {
+                                match sqlx::query!(r#"UPDATE error SET fault_end = ?2 WHERE fault_type = ?1 AND fault_end IS NULL"#,
+                                                   error.fault_type, fault_end).execute(&mut conn).await {
+                                    Ok(_) => { info!("INSERT error {:?} OK", error); },
+                                    Err(e) => { error!("INSERT error {:?} FAILED {:?}", error, e); /*TODO*/},
+                                }
+                            }
+                            (None, None) => {
+                                match sqlx::query!(r#"INSERT INTO error ( velocity_id ) VALUES ( ?1 )"#, velocity_id)
+                                .execute(&mut conn).await {
+                                    Ok(_) => { info!("INSERT error {:?} OK", error); },
+                                    Err(e) => { error!("INSERT error {:?} FAILED {:?}", error, e); /*TODO*/},
+                                }
+                            }
                         }
                     }
-                }*/
+                    else {
+                        error!("error format invalid - {:?}", val);
+                    }
+                }
             }
         }
     }
