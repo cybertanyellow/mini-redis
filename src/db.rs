@@ -4,15 +4,9 @@ use tokio::time::{self, Duration, Instant};
 use bytes::Bytes;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use tracing::{debug, error, info};
+use tracing::{debug, error, warn};
 use tokio::sync::mpsc;
-use std::env;
-use sqlx::sqlite::SqlitePool;
-use sqlx::types::chrono::{DateTime, Utc, NaiveDate};
-use std::str;
-use serde::{Deserialize, Serialize};
-//use chrono::prelude::*;
-use chrono::serde::{/*ts_milliseconds, */ts_seconds};
+use crate::flatbread::Flatbread;
 
 /// A wrapper around a `Db` instance. This exists to allow orderly cleanup
 /// of the `Db` by signalling the background purge task to shut down when
@@ -472,286 +466,103 @@ async fn request_tx_task(ch: mpsc::Sender<(String, String, Bytes)>, msg: (String
     ch.send(msg).await.unwrap();
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-enum DriverAction {
-    Driving(i32),
-    Stopping(i32),
-    Standby(i32),
-    Resting(i32),
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbCalibration {
-    user: String,
-    odo_after: f64,
-    odo_unit: f32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbTimeDate {
-    timestamp_before: Option<DateTime<Utc>>,
-    //#[serde(with = "ts_seconds")]
-    timestamp_after: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbVehicleUnit {
-    manufacture_name: String,
-    manufacture_address: String,
-    serial_number: String,
-    sw_version: String,
-    #[serde(with = "ts_seconds")]
-    install_timestamp: DateTime<Utc>,
-    manufacture_date: NaiveDate,
-    certification_number: String,
-    car_number: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbError {
-    fault_type: u16,
-    //#[serde(with = "ts_seconds")]
-    fault_start: Option<DateTime<Utc>>,
-    //#[serde(with = "ts_seconds")]
-    fault_end: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbEvent {
-    event_type: u16,
-    //#[serde(with = "ts_seconds")]
-    event_start: Option<DateTime<Utc>>,
-    //#[serde(with = "ts_seconds")]
-    event_end: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbDriver {
-    account: String,
-    //action: DriverAction,
-    action: i32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbTravelThreshold {
-    #[serde(with = "ts_seconds")]
-    timestamp_before: DateTime<Utc>,
-    #[serde(with = "ts_seconds")]
-    timestamp_after: DateTime<Utc>,
-    threshold_before: f32,
-    threshold_after: f32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbRestThreshold {
-    #[serde(with = "ts_seconds")]
-    timestamp_before: DateTime<Utc>,
-    #[serde(with = "ts_seconds")]
-    timestamp_after: DateTime<Utc>,
-    threshold_before: f32,
-    threshold_after: f32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbVelocity {
-    speed: f32,
-    odo: Option<f64>,
-    timestamp: Option<DateTime<Utc>>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct FbLocation {
-    logitude: f64,
-    latitude: f64,
-    altitude: f64,
-    speed_avg: f32,
-}
-
 async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, String, Bytes)>) {
     let mut interval_500ms = time::interval(time::Duration::from_millis(500));
     let mut interval_1s = time::interval(time::Duration::from_millis(1000));
-    let url: String = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://:memory:".to_string());
-    let pool: SqlitePool = SqlitePool::connect(&url).await.unwrap();
+    let mut flatbread = Flatbread::new().await;
 
-    let mut conn = pool.acquire().await.unwrap();
-
-    let mut velocity_id: Option<i64> = None;
-    let mut location_id: Option<i64> = None;
-    let mut driver_id: Option<i64> = None;
 
     // If the shutdown flag is set, then the task should exit.
     while !shared.is_shutdown() {
         tokio::select! {
             _ = interval_500ms.tick() => {
-                let mut velocity = FbVelocity {
-                    speed: 0.0,
-                    odo: None,
-                    timestamp: None,
-                };
+                let mut value = None;
                 {
-                    let state = shared.state.lock().unwrap();
-                    if let Some(value) = state.entries.get("velocity").map(|entry| entry.data.clone()) {
-                        //spd = str::from_utf8(&value).unwrap().parse::<FbVelocity>().unwrap();
-                        velocity = serde_json::from_slice(&value).unwrap();
+                    if let Ok(state) = shared.state.lock() {
+                        value = state.entries.get("velocity").map(|entry| entry.data.clone());
                     }
                 }
-                match sqlx::query!(r#"INSERT INTO velocity ( speed, odo, location_id, driver_id ) VALUES ( ?1, ?2, ?3, ?4 )"#,
-                velocity.speed, velocity.odo, location_id, driver_id).execute(&mut conn).await {
-                    Ok(r) => {
-                        velocity_id = Some(r.last_insert_rowid());
-                        debug!("INSERT velocity with {:?} OK {:?}", velocity, velocity_id);
-                    }
+                match flatbread.insert_velocity(value).await {
+                    Ok(_) => {}
                     Err(e) => {
-                        error!("INSERT velocity with {:?} fail {}", velocity, e);
+                        error!("Error inserting velocity: {}", e);
                     }
                 }
             }
             _ = interval_1s.tick() => {
-                let mut location = FbLocation {
-                    logitude: 0.0,
-                    latitude: 0.0,
-                    altitude: 0.0,
-                    speed_avg: 0.0,
-                };
-                {
-                    let state = shared.state.lock().unwrap();
-                    if let Some(value) = state.entries.get("location").map(|entry| entry.data.clone()) {
-                        if let Ok(json) = serde_json::from_slice(&value) {
-                            location = json;
+                    let mut value = None;
+                    {
+                        if let Ok(state) = shared.state.lock() {
+                            value = state.entries.get("location").map(|entry| entry.data.clone());
                         }
                     }
-                }
-                match sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
-                location.logitude, location.latitude, location.altitude, location.speed_avg).execute(&mut conn).await {
-                    Ok(r) => {
-                        location_id = Some(r.last_insert_rowid());
-                        debug!("INSERT location with {:?} OK {:?}", location, location_id);
+                    match flatbread.insert_location(value).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Error inserting location: {}", e);
+                        }
                     }
-                    Err(e) => {
-                        error!("INSERT location with {:?} fail {}", location, e);
-                    }
-                }
             }
             Some((cmd, key, val)) = request.recv() => {
                 debug!("cmd-{} key-{} value {:#?}", cmd, key, val.to_ascii_lowercase());
-
-                if key == "driver" {
-                    let driver: FbDriver = serde_json::from_slice(&val).unwrap();
-                    println!("driver {:?}", driver);
-                    match sqlx::query!(r#"INSERT INTO driver ( account, action ) VALUES ( ?1, ?2 )"#,
-                    driver.account, driver.action).execute(&mut conn).await {
-                        Ok(r) => {
-                            debug!("INSERT driver with {:?} OK {:?}", driver, driver_id);
-                            if driver.action == 1 || driver.action == 2 {
-                                driver_id = Some(r.last_insert_rowid());
+                match key.as_str() {
+                    "driver" => {
+                        match flatbread.update_driver(&val).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Error inserting driver: {}", e);
                             }
                         }
-                        Err(e) => {
-                            error!("INSERT driver with {:?} fail {}", driver, e);
-                        }
-                    }
-                }
-                if key == "calibration" {
-                    /* TODO change odo/mileage */
-                    let cal: FbCalibration = serde_json::from_slice(&val).unwrap();
-                    println!("calibration {:?}", cal);
-                    let _did = sqlx::query!(r#"INSERT INTO calibration ( user, odo_after, odo_unit ) VALUES ( ?1, ?2, ?3 )"#,
-                    cal.user, cal.odo_after, cal.odo_unit).execute(&mut conn).await.unwrap()
-                        .last_insert_rowid();
-                }
-                if key == "time-date" {
-                    /* TODO change system time */
-                    let tm: FbTimeDate = serde_json::from_slice(&val).unwrap();
-                    //println!("date-time {:?}", tm);
-                    match (tm.timestamp_before, tm.timestamp_after) {
-                        (Some(before), Some(after)) => {
-                            match sqlx::query!(r#"INSERT INTO time_date ( timestamp_before, timestamp_after ) VALUES ( ?1, ?2 )"#,
-                            before, after).execute(&mut conn).await {
-                                Ok(r) => { info!("INSERT date-time {:?} OK ID-{}", tm, r.last_insert_rowid()); },
-                                Err(e) => { info!("INSERT date-time {:?} FAILED {:?}", tm, e); /*TODO*/},
+                    },
+                    "calibration" => {
+                        match flatbread.update_calibration(&val).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Error inserting calibration: {}", e);
                             }
                         }
-                        (Some(before), None) => {
-                            match sqlx::query!(r#"INSERT INTO time_date ( timestamp_before ) VALUES ( ?1 )"#,
-                            before).execute(&mut conn).await {
-                                Ok(r) => { info!("INSERT date-time {:?} OK ID-{}", tm, r.last_insert_rowid()); },
-                                Err(e) => { info!("INSERT date-time {:?} FAILED {:?}", tm, e); /*TODO*/},
+                    },
+                    "time-date" => {
+                        match flatbread.update_time_date(&val).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Error inserting time-date: {}", e);
                             }
                         }
-                        (None, Some(after)) => {
-                            match sqlx::query!(r#"UPDATE time_date SET timestamp_after = ?1 WHERE timestamp_after IS NULL"#,
-                            after).execute(&mut conn).await {
-                                Ok(r) => { info!("UPDATE date-time {:?} OK ID-{}", tm, r.last_insert_rowid()); },
-                                Err(e) => { info!("UPDATE date-time {:?} FAILED {:?}", tm, e); /*TODO*/},
+                    },
+                    "event" => {
+                        match flatbread.update_event(&val).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Error inserting event: {}", e);
                             }
                         }
-                        (None, None) => {
-                            match sqlx::query!(r#"INSERT INTO time_date ( timestamp_after ) VALUES ( NULL )"#).execute(&mut conn).await {
-                                Ok(r) => { info!("INSERT date-time {:?} OK ID-{}", tm, r.last_insert_rowid()); },
-                                Err(e) => { info!("INSERT date-time {:?} FAILED {:?}", tm, e); /*TODO*/},
+                    },
+                    "error" => {
+                        match flatbread.update_error(&val).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Error inserting error: {}", e);
                             }
                         }
-                    }
-
-                }
-                if key == "event" {
-                    if let Ok(event) = serde_json::from_slice::<FbEvent>(&val) {
-                        debug!("event {:?}", event);
-
-                        if event.event_end.is_some() {
-                            match sqlx::query!(r#"UPDATE event SET event_end = ?2 WHERE event_type = ?1"#,
-                                               event.event_type, event.event_end).execute(&mut conn).await {
-                                Ok(_) => { debug!("UPDATE event {:?} OK", event); },
-                                Err(e) => { debug!("UPDATE event {:?} FAILED {:?}", event, e); /*TODO*/},
-                            }
-                        } else {
-                            match sqlx::query!(r#"INSERT INTO event (event_type, velocity_id) VALUES ( ?1, ?2)"#,
-                            event.event_type, velocity_id).execute(&mut conn).await {
-                                Ok(_) => { debug!("INSERT event - {:?} OK", event)},
-                                Err(e) => { error!("INSERT event error-{:?}", e)},
+                    },
+                    "travel-threshold" => {
+                        match flatbread.update_travel_threshold(&val).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Error inserting error: {}", e);
                             }
                         }
-                    }
-                    else {
-                        error!("event format invalid - {:?}", val);
-                    }
-                }
-                if key == "error" {
-                    if let Ok(error) = serde_json::from_slice::<FbError>(&val) {
-                        match (error.fault_start, error.fault_end) {
-                            (Some(fault_start), Some(fault_end)) => {
-                                match sqlx::query!(r#"INSERT INTO error ( fault_type, fault_start, fault_end, velocity_id ) VALUES ( ?1, ?2, ?3, ?4)"#,
-                                error.fault_type, fault_start, fault_end, velocity_id).execute(&mut conn).await {
-                                    Ok(_) => { info!("INSERT error {:?} OK", error); },
-                                    Err(e) => { error!("INSERT error {:?} FAILED {:?}", error, e); /*TODO*/},
-                                }
-                            }
-                            (Some(fault_start), None) => {
-                                match sqlx::query!(r#"INSERT INTO error ( fault_type, fault_start, velocity_id ) VALUES ( ?1, ?2, ?3 )"#,
-                                error.fault_type, fault_start, velocity_id).execute(&mut conn).await {
-                                    Ok(_) => { info!("INSERT error {:?} OK", error); },
-                                    Err(e) => { error!("INSERT error {:?} FAILED {:?}", error, e); /*TODO*/},
-                                }
-                            }
-                            (None, Some(fault_end)) => {
-                                match sqlx::query!(r#"UPDATE error SET fault_end = ?2 WHERE fault_type = ?1 AND fault_end IS NULL"#,
-                                                   error.fault_type, fault_end).execute(&mut conn).await {
-                                    Ok(_) => { info!("INSERT error {:?} OK", error); },
-                                    Err(e) => { error!("INSERT error {:?} FAILED {:?}", error, e); /*TODO*/},
-                                }
-                            }
-                            (None, None) => {
-                                match sqlx::query!(r#"INSERT INTO error ( velocity_id ) VALUES ( ?1 )"#, velocity_id)
-                                .execute(&mut conn).await {
-                                    Ok(_) => { info!("INSERT error {:?} OK", error); },
-                                    Err(e) => { error!("INSERT error {:?} FAILED {:?}", error, e); /*TODO*/},
-                                }
+                    },
+                    "rest-threshold" => {
+                        match flatbread.update_rest_threshold(&val).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("Error inserting error: {}", e);
                             }
                         }
-                    }
-                    else {
-                        error!("error format invalid - {:?}", val);
-                    }
+                    },
+                    _ => { warn!("Unknown cmd-{} with value-{:?}", cmd, val)},
                 }
             }
         }
