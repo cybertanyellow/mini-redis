@@ -1,0 +1,303 @@
+{
+  "db": "SQLite",
+  "05cb914a2167da8fb9dfc7f2e5af80dd0d3a4298393b05c3b2ec403da44ffd53": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "INSERT INTO rest_threshold ( timestamp_before, timestamp_after, threshold_after ) VALUES ( ?1, ?2, ?3)"
+  },
+  "08b515ff8935336d78debf870833d57bdd493f804f4bbc04f16bd59213110a68": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO travel_threshold ( threshold_before, threshold_after ) VALUES ( ?1, ?2 )"
+  },
+  "0a70cb280096b5676c448515685543a9aec454b76ab8227a42ef4b9f45532729": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "INSERT INTO travel_threshold ( timestamp_before, timestamp_after, threshold_before, threshold_after ) VALUES ( ?1, ?2, ?3, ?4)"
+  },
+  "0da9f5c736aaea67b85215ec8cc6afb14a4e5ed90410019a2b860636224563b2": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "UPDATE error SET fault_end = ?2 WHERE fault_type = ?1 AND fault_end IS NULL"
+  },
+  "18820c75440f9d6098e60b9e997d9e0a81b8f15aed9606fc3f09e0f8b18ba38a": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "UPDATE time_date SET timestamp_after = ?1 WHERE timestamp_after IS NULL"
+  },
+  "24a46b0e69bbe1562b5f04847ff2379fe176a8728db4b5942ea569abfa16a254": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO driver ( account, action ) VALUES ( ?1, ?2 )"
+  },
+  "3f9af303217b3c3d3355892638b8fbe9967e8356a766654c066938b12d75e3c8": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO rest_threshold ( threshold_before, threshold_after ) VALUES ( ?1, ?2 )"
+  },
+  "44bc2bddf7f8ae696bbea4e0f085ebba320caa3e68d6f10aa17bd9b6b994d5cf": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "INSERT INTO rest_threshold ( timestamp_after, threshold_before, threshold_after ) VALUES ( ?1, ?2, ?3)"
+  },
+  "4808d5f7a5c9f69375f28b8353e707e6b3e0e4e1621a838500076b06db0266ad": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "INSERT INTO travel_threshold ( timestamp_before, threshold_before, threshold_after ) VALUES ( ?1, ?2, ?3)"
+  },
+  "4dddc5f9a7c7df912695c67c516ce417f4d4e4f362b671dc42e90f602ba18ab6": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO time_date ( timestamp_before, timestamp_after ) VALUES ( ?1, ?2 )"
+  },
+  "5a16376b2c00e7391173253cba84274261bcaf06be65615db403e05ffb61acea": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"
+  },
+  "7077fe0be189077104425b28acdee9698fed6c09c5742d0477a06643cf8c458c": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "INSERT INTO rest_threshold ( timestamp_before, timestamp_after, threshold_before, threshold_after ) VALUES ( ?1, ?2, ?3, ?4)"
+  },
+  "7b69d762f84db0bead62e965c39d616ef46d90f9622b0d72f5d16a6510034684": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO rest_threshold ( timestamp_after, threshold_after ) VALUES ( ?1, ?2 )"
+  },
+  "7cc777806a5eccb847b0bcad562a3d4ed6b0bfb220c96765da658436b84d0f70": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "INSERT INTO travel_threshold ( threshold_after ) VALUES ( ?1 )"
+  },
+  "8527dde45999c7e44859acec4b3de08600bdd746ed5d1147b38cf9c09dfd0831": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "INSERT INTO travel_threshold ( timestamp_after, threshold_before, threshold_after ) VALUES ( ?1, ?2, ?3)"
+  },
+  "8aa5ee1029f6a3d1ec3701ba9a268e5023969c52ea751546d8cca158b49bf98b": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 0
+      }
+    },
+    "query": "INSERT INTO time_date ( timestamp_after ) VALUES ( NULL )"
+  },
+  "aa867063bbe05ec5045342578433422029ae5e89909588fc5d7ef79827c06b2a": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "INSERT INTO time_date ( timestamp_before ) VALUES ( ?1 )"
+  },
+  "abb4f25a665ef9f0c4c0a2d7943e1e52c2bb878635d8c1c88727a5a767524d3d": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO event (event_type, velocity_id) VALUES ( ?1, ?2)"
+  },
+  "ba66af3df771eb23673e28fdd6e9cbaf03e9a1bfeca55966ab59719302fb9cb7": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "INSERT INTO calibration ( user, odo_after, odo_unit ) VALUES ( ?1, ?2, ?3 )"
+  },
+  "bf87c57045a83aac3638d05c8529022b991f62a3a7b04c8a5e11bf1ca78f60c8": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO rest_threshold ( timestamp_before, threshold_after ) VALUES ( ?1, ?2 )"
+  },
+  "c34702f68ecbcbed9b5fa6bed756e606fd8625be537ab4fd01c41869c8f5b345": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "INSERT INTO error ( fault_type, fault_start, fault_end, velocity_id ) VALUES ( ?1, ?2, ?3, ?4)"
+  },
+  "c8989f7efab7789f579066d9d7607e39f0dd79340bff489e24b1b87118b23387": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "INSERT INTO rest_threshold ( timestamp_before, threshold_before, threshold_after ) VALUES ( ?1, ?2, ?3)"
+  },
+  "c943c5ef4ad8ba9dfa5c148d8e69728f90999ebbfc5cc895687ca9951d6b892a": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 4
+      }
+    },
+    "query": "INSERT INTO velocity ( speed, odo, location_id, driver_id ) VALUES ( ?1, ?2, ?3, ?4 )"
+  },
+  "d48aa64b269aeb71e0a4e477773fda5097e895757e93cf2e539ef496fb231164": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "INSERT INTO travel_threshold ( timestamp_before, timestamp_after, threshold_after ) VALUES ( ?1, ?2, ?3)"
+  },
+  "d812536f66c0f129d81bea7432b9622f9ecc0023f652516ae9c6e782764153e5": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO travel_threshold ( timestamp_after, threshold_after ) VALUES ( ?1, ?2 )"
+  },
+  "e0a5a83501aaea8ed1d42c1bb2bdc8501f91d81a5fa89f22e3fbe03f86feae28": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "INSERT INTO error ( velocity_id ) VALUES ( ?1 )"
+  },
+  "e83330e43f471f037ce80b63f4279cdcca75ec62cf04fe25c13dd5623b013604": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "INSERT INTO rest_threshold ( threshold_after ) VALUES ( ?1 )"
+  },
+  "e9e53f131ebaa67b4e57ac8d83a439e6649e4df43e0389397fa2854c3615d007": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "UPDATE event SET event_end = ?2 WHERE event_type = ?1"
+  },
+  "f520261010649fc2153cb1136f19c274764fe46584557b693a92ec9f9dd4c3d5": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "INSERT INTO error ( fault_type, fault_start, velocity_id ) VALUES ( ?1, ?2, ?3 )"
+  },
+  "fa097b438a5de2882a0d07dbc5fbdb0fa400ea1106be514d0635a3ab05c288be": {
+    "describe": {
+      "columns": [],
+      "nullable": [],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "INSERT INTO travel_threshold ( timestamp_before, threshold_after ) VALUES ( ?1, ?2 )"
+  }
+}
