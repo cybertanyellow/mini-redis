@@ -18,8 +18,8 @@ CREATE TABLE vehicle_unit (
 CREATE TABLE calibration (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     user CHAR(36) NOT NULL,
-    odo_before Double DEFAULT NULL, --TODO, using Double(f64)?
-    odo_after Double NOT NULL, --TODO, using Double(f64)?
+    odo_before REAL DEFAULT NULL, --TODO, using Double(f64)?
+    odo_after REAL NOT NULL, --TODO, using Double(f64)?
     odo_unit Float NOT NULL, --TODO, hidden column, using f32?
     timestamp_before TIMESTAMP DEFAULT NULL, --TODO, ??
     timestamp_after TIMESTAMP DEFAULT CURRENT_TIMESTAMP

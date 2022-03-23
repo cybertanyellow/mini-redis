@@ -2,7 +2,7 @@
 CREATE TABLE velocity (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     speed Float DEFAULT NULL,
-    odo Double DEFAULT NULL,
+    odo REAL(8) DEFAULT NULL,
     timestamp TIMESTAMP DATETIME DEFAULT(STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
     location_id INTEGER DEFAULT NULL,
     driver_id INTEGER DEFAULT NULL,
@@ -14,9 +14,9 @@ CREATE TABLE velocity (
 
 CREATE TABLE location (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    logitude Double NOT NULL,
-    latitude Double NOT NULL,
-    altitude Double NOT NULL, --TODO, f64?
+    logitude REAL NOT NULL,
+    latitude REAL NOT NULL,
+    altitude REAL NOT NULL, --TODO, f64?
     speed_avg Float NOT NULL,
 
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP --reserved

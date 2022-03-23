@@ -550,7 +550,7 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
                         match flatbread.update_travel_threshold(&val).await {
                             Ok(_) => {}
                             Err(e) => {
-                                error!("Error inserting error: {}", e);
+                                error!("travel-threshold inserting error: {}", e);
                             }
                         }
                     },
@@ -558,7 +558,15 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
                         match flatbread.update_rest_threshold(&val).await {
                             Ok(_) => {}
                             Err(e) => {
-                                error!("Error inserting error: {}", e);
+                                error!("rest-threshold inserting error: {}", e);
+                            }
+                        }
+                    },
+                    "velocity" => {
+                        match flatbread.update_velocity(&val).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("velocity inserting error: {}", e);
                             }
                         }
                     },
