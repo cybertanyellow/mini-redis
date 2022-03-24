@@ -7,8 +7,8 @@ pub use publish::Publish;
 mod set;
 pub use set::Set;
 
-mod policy;
-pub use policy::Policy;
+mod sensor;
+pub use sensor::Sensor;
 
 mod subscribe;
 pub use subscribe::{Subscribe, Unsubscribe};
@@ -29,7 +29,7 @@ pub enum Command {
     Get(Get),
     Publish(Publish),
     Set(Set),
-    Policy(Policy),
+    Sensor(Sensor),
     Subscribe(Subscribe),
     Unsubscribe(Unsubscribe),
     Ping(Ping),
@@ -64,7 +64,7 @@ impl Command {
             "get" => Command::Get(Get::parse_frames(&mut parse)?),
             "publish" => Command::Publish(Publish::parse_frames(&mut parse)?),
             "set" => Command::Set(Set::parse_frames(&mut parse)?),
-            "policy" => Command::Policy(Policy::parse_frames(&mut parse)?),
+            "sensor" => Command::Sensor(Sensor::parse_frames(&mut parse)?),
             "subscribe" => Command::Subscribe(Subscribe::parse_frames(&mut parse)?),
             "unsubscribe" => Command::Unsubscribe(Unsubscribe::parse_frames(&mut parse)?),
             "ping" => Command::Ping(Ping::parse_frames(&mut parse)?),
@@ -104,7 +104,7 @@ impl Command {
             Get(cmd) => cmd.apply(db, dst).await,
             Publish(cmd) => cmd.apply(db, dst).await,
             Set(cmd) => cmd.apply(db, dst).await,
-            Policy(cmd) => cmd.apply(db, dst).await,
+            Sensor(cmd) => cmd.apply(db, dst).await,
             Subscribe(cmd) => cmd.apply(db, dst, shutdown).await,
             Ping(cmd) => cmd.apply(dst).await,
             Unknown(cmd) => cmd.apply(dst).await,
@@ -120,7 +120,7 @@ impl Command {
             Command::Get(_) => "get",
             Command::Publish(_) => "pub",
             Command::Set(_) => "set",
-            Command::Policy(_) => "policy",
+            Command::Sensor(_) => "sensor",
             Command::Subscribe(_) => "subscribe",
             Command::Unsubscribe(_) => "unsubscribe",
             Command::Ping(_) => "ping",

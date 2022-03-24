@@ -39,8 +39,8 @@ enum Command {
         #[structopt(parse(try_from_str = duration_from_ms_str))]
         expires: Option<Duration>,
     },
-    /// Policy to update by the string.
-    Policy {
+    /// Sensor to update by the string.
+    Sensor {
         /// Name of key to set
         key: String,
 
@@ -49,8 +49,8 @@ enum Command {
         value: Bytes,
 
         /// Update period specified amount of time
-        #[structopt(parse(try_from_str = duration_from_ms_str))]
-        period: Option<Duration>,
+        //#[structopt(parse(try_from_str = duration_from_ms_str))]
+        policy: Option<String>,
     },
     ///  Publisher to send a message to a specific channel.
     Publish {
@@ -120,24 +120,24 @@ async fn main() -> flatbread::Result<()> {
             client.set_expires(&key, value, expires).await?;
             println!("OK");
         }
-        Command::Policy {
+        Command::Sensor {
             key,
             value,
-            period: None,
+            policy: None,
         } => {
-            client.policy(&key, value).await?;
+            client.sensor(&key, value).await?;
             println!("OK");
         }
-        Command::Policy {
+        Command::Sensor {
             key,
             value,
-            period: Some(period),
+            policy: Some(policy),
         } => {
-            client.policy_period(&key, value, period).await?;
+            client.sensor_policy(&key, value, policy).await?;
             println!("OK");
         }
         Command::Publish { channel, message } => {
-            client.publish(&channel, message.into()).await?;
+            client.publish(&channel, message).await?;
             println!("Publish OK");
         }
         Command::Subscribe { channels } => {

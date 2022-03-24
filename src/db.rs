@@ -69,9 +69,9 @@ struct State {
     /// and pub/sub. `flatbread` handles this by using a separate `HashMap`.
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
-    /// flatbread: persists policy for period insertion.
-    //policies: HashMap<String, Policy>,
-    //policy_rx: mpsc::Receiver<()>,
+    /// flatbread: persists sensor for period insertion.
+    //policies: HashMap<String, Sensor>,
+    //sensor_rx: mpsc::Receiver<()>,
     request: mpsc::Sender<(String, String, Bytes)>,
 
     /// Tracks key TTLs.
@@ -111,7 +111,7 @@ struct Entry {
 }
 
 /*#[derive(Debug)]
-struct Policy {
+struct Sensor {
     /// Uniquely identifies this entry.
     ///id: u64,
 
@@ -156,7 +156,7 @@ impl Db {
                 expirations: BTreeMap::new(),
                 next_id: 0,
                 shutdown: false,
-                //policy_rx: rx,
+                //sensor_rx: rx,
                 request: tx,
             }),
             background_task: Notify::new(),
@@ -164,7 +164,7 @@ impl Db {
 
         // Start the background task.
         tokio::spawn(purge_expired_tasks(shared.clone()));
-        tokio::spawn(period_policy_tasks(shared.clone(), rx));
+        tokio::spawn(fb161_period_cache2sql_tasks(shared.clone(), rx));
 
         Db { shared }
     }
@@ -254,13 +254,13 @@ impl Db {
         }
     }
 
-    /*pub(crate) fn policy(&self, key: String, value: Bytes, period: Option<Duration>) {
+    /*pub(crate) fn sensor(&self, key: String, value: Bytes, period: Option<Duration>) {
         let mut state = self.shared.state.lock().unwrap();
 
         // Insert the entry into the `HashMap`.
         let _prev = state.policies.insert(
             key,
-            Policy {
+            Sensor {
                 //id,
                 data: value,
                 period,
@@ -386,7 +386,7 @@ impl Shared {
         self.state.lock().unwrap().shutdown
     }
 
-    /*fn period_policy_keys(&self) -> Option<Instant> {
+    /*fn period_sensor_keys(&self) -> Option<Instant> {
         let mut state = self.state.lock().unwrap();
 
         if state.shutdown {
@@ -466,7 +466,7 @@ async fn request_tx_task(ch: mpsc::Sender<(String, String, Bytes)>, msg: (String
     ch.send(msg).await.unwrap();
 }
 
-async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, String, Bytes)>) {
+async fn fb161_period_cache2sql_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, String, Bytes)>) {
     let mut interval_500ms = time::interval(time::Duration::from_millis(500));
     let mut interval_1s = time::interval(time::Duration::from_millis(1000));
     let mut flatbread = Flatbread::new().await;
@@ -562,19 +562,19 @@ async fn period_policy_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(S
                             }
                         }
                     },
-                    "velocity" => {
+                    /*"velocity" => {
                         match flatbread.update_velocity(&val).await {
                             Ok(_) => {}
                             Err(e) => {
                                 error!("velocity inserting error: {}", e);
                             }
                         }
-                    },
+                    },*/
                     _ => { warn!("Unknown cmd-{} with value-{:?}", cmd, val)},
                 }
             }
         }
     }
 
-    debug!("Policy period update/insert background task shut down")
+    debug!("FB161 period update/insert background task shut down")
 }

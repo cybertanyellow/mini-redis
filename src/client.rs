@@ -2,7 +2,7 @@
 //!
 //! Provides an async connect and methods for issuing the supported commands.
 
-use crate::cmd::{Get, Publish, Set, Policy, Subscribe, Unsubscribe};
+use crate::cmd::{Get, Publish, Set, Sensor, Subscribe, Unsubscribe};
 use crate::{Connection, Frame};
 
 use async_stream::try_stream;
@@ -236,26 +236,26 @@ impl Client {
     }
 
     #[instrument(skip(self))]
-    pub async fn policy(&mut self, key: &str, value: Bytes) -> crate::Result<()> {
+    pub async fn sensor(&mut self, key: &str, value: Bytes) -> crate::Result<()> {
         // Create a `Set` command and pass it to `set_cmd`. A separate method is
         // used to set a value with an expiration. The common parts of both
         // functions are implemented by `set_cmd`.
-        self.policy_cmd(Policy::new(key, value, None)).await
+        self.sensor_cmd(Sensor::new(key, value, None)).await
     }
     #[instrument(skip(self))]
-    pub async fn policy_period(
+    pub async fn sensor_policy(
         &mut self,
         key: &str,
         value: Bytes,
-        period: Duration,
+        policy: String,
     ) -> crate::Result<()> {
         // Create a `Set` command and pass it to `set_cmd`. A separate method is
         // used to set a value with an expiration. The common parts of both
         // functions are implemented by `set_cmd`.
-        self.policy_cmd(Policy::new(key, value, Some(period))).await
+        self.sensor_cmd(Sensor::new(key, value, Some(policy))).await
     }
-    async fn policy_cmd(&mut self, cmd: Policy) -> crate::Result<()> {
-        // Convert the `Policy` command into a frame
+    async fn sensor_cmd(&mut self, cmd: Sensor) -> crate::Result<()> {
+        // Convert the `Sensor` command into a frame
         let frame = cmd.into_frame();
 
         debug!(request = ?frame);

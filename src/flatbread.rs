@@ -148,32 +148,30 @@ impl Flatbread {
     }
 
     pub(crate) async fn insert_velocity(&mut self, value: Option<Bytes>) -> Result<i64, sqlx::Error> {
-        let mut velocity = CacheVelocity {
-            speed: 0.0,
-            odo: None,
-            timestamp: None,
-        };
-
-        if let Some(value) = { value } {
-            velocity = serde_json::from_slice(&value).unwrap();
+        if let Some(value) = value {
+            self.update_velocity(&value).await
         }
+        else {
+            let velocity = CacheVelocity {
+                speed: 0.0,
+                odo: None,
+                timestamp: None,
+            };
 
-        self.odo = self.odo.map(|x| x + velocity.speed / 7200.0);
-        match sqlx::query!(r#"INSERT INTO velocity ( speed, odo, location_id, driver_id ) VALUES ( ?1, ?2, ?3, ?4 )"#,
-        velocity.speed, self.odo, self.location_id, self.driver_id).execute(&mut self.conn).await {
-            Ok(r) => {
-                self.velocity_id = Some(r.last_insert_rowid());
-                info!("INSERT velocity with {:?} OK {:?}", velocity, self.velocity_id);
-                Ok(r.last_insert_rowid())
-            }
-            Err(e) => {
-                error!("INSERT velocity with {:?} fail {}", velocity, e);
-                Err(e)
+            match sqlx::query!(r#"INSERT INTO velocity ( speed, odo, location_id, driver_id ) VALUES ( ?1, ?2, ?3, ?4 )"#,
+            velocity.speed, self.odo, self.location_id, self.driver_id).execute(&mut self.conn).await {
+                Ok(r) => {
+                    self.velocity_id = Some(r.last_insert_rowid());
+                    info!("INSERT velocity with {:?} OK {:?}", velocity, self.velocity_id);
+                    Ok(r.last_insert_rowid())
+                }
+                Err(e) => {
+                    error!("INSERT velocity with {:?} fail {}", velocity, e);
+                    Err(e)
+                }
             }
         }
-
     }
-
 
     pub(crate) async fn insert_location(&mut self, value: Option<Bytes>) -> Result<i64, sqlx::Error> {
         let mut location = CacheLocation {
@@ -656,8 +654,8 @@ impl Flatbread {
         }
     }
 
-    pub(crate) async fn update_velocity(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
-        if let Ok(velocity) = serde_json::from_slice::<CacheVelocity>(&value) {
+    async fn update_velocity(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
+        if let Ok(velocity) = serde_json::from_slice::<CacheVelocity>(value) {
             match (velocity.odo, velocity.timestamp) {
                 (Some(_odo), Some(_timestamp)) => {
                     self.odo = velocity.odo;
