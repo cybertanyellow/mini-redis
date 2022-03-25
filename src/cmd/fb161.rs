@@ -6,7 +6,7 @@ use bytes::Bytes;
 use tracing::{debug, warn, instrument};
 use tokio::time::{self/*, Duration, Instant*/};
 
-/// Sensor `key` to hold the string `value`.
+/// Fb161 `key` to hold the string `value`.
 ///
 /// If `key` already holds a value, it is overwritten, regardless of its type.
 /// Any previous time to live associated with the key is discarded on successful
@@ -16,10 +16,10 @@ use tokio::time::{self/*, Duration, Instant*/};
 ///
 /// Currently, the following options are supported:
 ///
-/// * EX `seconds` -- Sensor the specified policy time, in seconds.
-/// * PX `milliseconds` -- Sensor the specified policy time, in milliseconds.
+/// * EX `seconds` -- Fb161 the specified policy time, in seconds.
+/// * PX `milliseconds` -- Fb161 the specified policy time, in milliseconds.
 #[derive(Debug, Clone)]
-pub struct Sensor {
+pub struct Fb161 {
     /// the lookup key
     key: String,
 
@@ -30,13 +30,13 @@ pub struct Sensor {
     policy: Option<String>,
 }
 
-impl Sensor {
-    /// Create a new `Sensor` command which sets `key` to `value`.
+impl Fb161 {
+    /// Create a new `Fb161` command which sets `key` to `value`.
     ///
     /// If `policy` is `Some`, the value should policy after the specified
     /// duration.
-    pub fn new(key: impl ToString, value: Bytes, policy: Option<String>) -> Sensor {
-        Sensor {
+    pub fn new(key: impl ToString, value: Bytes, policy: Option<String>) -> Fb161 {
+        Fb161 {
             key: key.to_string(),
             value,
             policy,
@@ -58,7 +58,7 @@ impl Sensor {
         self.policy.as_ref()
     }*/
 
-    /// Parse a `Sensor` instance from a received frame.
+    /// Parse a `Fb161` instance from a received frame.
     ///
     /// The `Parse` argument provides a cursor-like API to read fields from the
     /// `Frame`. At this point, the entire frame has already been received from
@@ -68,7 +68,7 @@ impl Sensor {
     ///
     /// # Returns
     ///
-    /// Returns the `Sensor` value on success. If the frame is malformed, `Err` is
+    /// Returns the `Fb161` value on success. If the frame is malformed, `Err` is
     /// returned.
     ///
     /// # Format
@@ -78,7 +78,7 @@ impl Sensor {
     /// ```text
     /// SET key value [EX seconds|PX milliseconds]
     /// ```
-    pub(crate) fn parse_frames(parse: &mut Parse) -> crate::Result<Sensor> {
+    pub(crate) fn parse_frames(parse: &mut Parse) -> crate::Result<Fb161> {
         //use ParseError::EndOfStream;
 
         // Read the key to set. This is a required field
@@ -122,27 +122,27 @@ impl Sensor {
             Err(err) => return Err(err.into()),
         }*/
 
-        Ok(Sensor { key, value, policy })
+        Ok(Fb161 { key, value, policy })
     }
 
-    /// Apply the `Sensor` command to the specified `Db` instance.
+    /// Apply the `Fb161` command to the specified `Db` instance.
     ///
     /// The response is written to `dst`. This is called by the server in order
     /// to execute a received command.
     #[instrument(skip(self, db, dst))]
     pub(crate) async fn apply(self, db: &Db, dst: &mut Connection) -> crate::Result<()> {
-        // Sensor the value in the shared database state.
+        // Fb161 the value in the shared database state.
         /*db.set(self.key, self.value, self.policy);
          */
         match self.key.as_str() {
             "velocity" => {
-                tokio::spawn(fb161_sensor_velocity_task(db.clone(), self.clone()));
+                tokio::spawn(fb161_fb161_velocity_task(db.clone(), self.clone()));
             },
             "location" => {
-                tokio::spawn(fb161_sensor_location_task(db.clone(), self.clone()));
+                tokio::spawn(fb161_fb161_location_task(db.clone(), self.clone()));
             },
             _ => {
-                warn!("unknown sensor key: {}", self.key);
+                warn!("unknown fb161 key: {}", self.key);
             }
         }
 
@@ -156,11 +156,11 @@ impl Sensor {
 
     /// Converts the command into an equivalent `Frame`.
     ///
-    /// This is called by the client when encoding a `Sensor` command to send to
+    /// This is called by the client when encoding a `Fb161` command to send to
     /// the server.
     pub(crate) fn into_frame(self) -> Frame {
         let mut frame = Frame::array();
-        frame.push_bulk(Bytes::from("sensor".as_bytes()));
+        frame.push_bulk(Bytes::from("fb161".as_bytes()));
         frame.push_bulk(Bytes::from(self.key.into_bytes()));
         frame.push_bulk(self.value);
         if let Some(policy) = self.policy {
@@ -171,7 +171,7 @@ impl Sensor {
 
 }
 
-async fn fb161_sensor_velocity_task(db: Db, s: Sensor) {
+async fn fb161_fb161_velocity_task(db: Db, s: Fb161) {
     //println!("TODO key-{:?} value-{:?} policy-{:?}", s.key, s.value, s.policy);
     let mut speed = 0.0;
     let mut odo = 100.0;
@@ -194,7 +194,7 @@ async fn fb161_sensor_velocity_task(db: Db, s: Sensor) {
     }
 }
 
-async fn fb161_sensor_location_task(db: Db, s: Sensor) {
+async fn fb161_fb161_location_task(db: Db, s: Fb161) {
     println!("TODO key-{:?} value-{:?} policy-{:?}", s.key, s.value, s.policy);
     let mut logitude = 0.0;
     let mut latitude = 0.0;

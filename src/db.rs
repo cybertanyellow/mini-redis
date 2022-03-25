@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error, warn};
 use tokio::sync::mpsc;
-use crate::flatbread::Flatbread;
+use crate::fb161_sql::FbSql;
 
 /// A wrapper around a `Db` instance. This exists to allow orderly cleanup
 /// of the `Db` by signalling the background purge task to shut down when
@@ -69,9 +69,7 @@ struct State {
     /// and pub/sub. `flatbread` handles this by using a separate `HashMap`.
     pub_sub: HashMap<String, broadcast::Sender<Bytes>>,
 
-    /// flatbread: persists sensor for period insertion.
-    //policies: HashMap<String, Sensor>,
-    //sensor_rx: mpsc::Receiver<()>,
+    /// flatbread: persists fb161 for period insertion.
     request: mpsc::Sender<(String, String, Bytes)>,
 
     /// Tracks key TTLs.
@@ -110,18 +108,6 @@ struct Entry {
     expires_at: Option<Instant>,
 }
 
-/*#[derive(Debug)]
-struct Sensor {
-    /// Uniquely identifies this entry.
-    ///id: u64,
-
-    /// Stored data
-    _data: Bytes,
-
-    /// Duration at which period insertions should be made to the database.
-    _period: Option<Duration>,
-}*/
-
 impl DbDropGuard {
     /// Create a new `DbHolder`, wrapping a `Db` instance. When this is dropped
     /// the `Db`'s purge task will be shut down.
@@ -156,7 +142,7 @@ impl Db {
                 expirations: BTreeMap::new(),
                 next_id: 0,
                 shutdown: false,
-                //sensor_rx: rx,
+                //fb161_rx: rx,
                 request: tx,
             }),
             background_task: Notify::new(),
@@ -253,25 +239,6 @@ impl Db {
             self.shared.background_task.notify_one();
         }
     }
-
-    /*pub(crate) fn sensor(&self, key: String, value: Bytes, period: Option<Duration>) {
-        let mut state = self.shared.state.lock().unwrap();
-
-        // Insert the entry into the `HashMap`.
-        let _prev = state.policies.insert(
-            key,
-            Sensor {
-                //id,
-                data: value,
-                period,
-            },
-        );
-
-        // Release the mutex before notifying the background task. This helps
-        // reduce contention by avoiding the background task waking up only to
-        // be unable to acquire the mutex due to this function still holding it.
-        drop(state);
-    }*/
 
     /// Returns a `Receiver` for the requested channel.
     ///
@@ -386,7 +353,7 @@ impl Shared {
         self.state.lock().unwrap().shutdown
     }
 
-    /*fn period_sensor_keys(&self) -> Option<Instant> {
+    /*fn period_fb161_keys(&self) -> Option<Instant> {
         let mut state = self.state.lock().unwrap();
 
         if state.shutdown {
@@ -469,7 +436,7 @@ async fn request_tx_task(ch: mpsc::Sender<(String, String, Bytes)>, msg: (String
 async fn fb161_period_cache2sql_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, String, Bytes)>) {
     let mut interval_500ms = time::interval(time::Duration::from_millis(500));
     let mut interval_1s = time::interval(time::Duration::from_millis(1000));
-    let mut flatbread = Flatbread::new().await;
+    let mut flatbread = FbSql::new().await;
 
 
     // If the shutdown flag is set, then the task should exit.

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use chrono::serde::{/*ts_milliseconds, */ts_seconds};
 
 #[derive(Debug)]
-pub(crate) struct Flatbread {
+pub(crate) struct FbSql {
     odo: Option<f32>, /*TODO for f64 */
     velocity_id: Option<i64>,
     location_id: Option<i64>,
@@ -121,7 +121,7 @@ struct CacheLocation {
     speed_avg: f32,
 }
 
-impl Flatbread {
+impl FbSql {
     pub async fn new() -> Self {
         let url: String = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://:memory:".to_string());
         let pool: SqlitePool = SqlitePool::connect(&url).await.unwrap();
@@ -138,7 +138,7 @@ impl Flatbread {
             driver_id = record.driver_id;
         }
 
-        Flatbread {
+        FbSql {
             odo,
             velocity_id,
             location_id,
