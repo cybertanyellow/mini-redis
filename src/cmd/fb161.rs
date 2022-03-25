@@ -3,8 +3,8 @@ use crate::{Connection, Db, Frame};
 
 use bytes::Bytes;
 //use std::time::Duration;
-use tracing::{debug, warn, instrument};
-use tokio::time::{self/*, Duration, Instant*/};
+use tracing::{debug, /*warn,*/ instrument};
+//use tokio::time::{self/*, Duration, Instant*/};
 
 /// Fb161 `key` to hold the string `value`.
 ///
@@ -129,12 +129,12 @@ impl Fb161 {
     ///
     /// The response is written to `dst`. This is called by the server in order
     /// to execute a received command.
-    #[instrument(skip(self, db, dst))]
-    pub(crate) async fn apply(self, db: &Db, dst: &mut Connection) -> crate::Result<()> {
+    #[instrument(skip(self, _db, dst))]
+    pub(crate) async fn apply(self, _db: &Db, dst: &mut Connection) -> crate::Result<()> {
         // Fb161 the value in the shared database state.
         /*db.set(self.key, self.value, self.policy);
          */
-        match self.key.as_str() {
+        /*match self.key.as_str() {
             "velocity" => {
                 tokio::spawn(fb161_fb161_velocity_task(db.clone(), self.clone()));
             },
@@ -144,10 +144,10 @@ impl Fb161 {
             _ => {
                 warn!("unknown fb161 key: {}", self.key);
             }
-        }
+        }*/
 
         // Create a success response and write it to `dst`.
-        let response = Frame::Simple("OK".to_string());
+        let response = Frame::Simple("TODO".to_string());
         debug!(?response);
         dst.write_frame(&response).await?;
 
@@ -171,7 +171,7 @@ impl Fb161 {
 
 }
 
-async fn fb161_fb161_velocity_task(db: Db, s: Fb161) {
+/*async fn fb161_fb161_velocity_task(db: Db, s: Fb161) {
     //println!("TODO key-{:?} value-{:?} policy-{:?}", s.key, s.value, s.policy);
     let mut speed = 0.0;
     let mut odo = 100.0;
@@ -217,4 +217,4 @@ async fn fb161_fb161_location_task(db: Db, s: Fb161) {
             }
         }
     }
-}
+}*/
