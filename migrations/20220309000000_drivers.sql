@@ -1,7 +1,7 @@
 -- Add migration script here
 CREATE TABLE driver (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    account CHARACTER(18) NOT NULL,
+    account TEXT NOT NULL,
     action INTEGER NOT NULL, --TODO/XXX, 1/2/3/4 for driving/stopping/standby/resting
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     travel_threshold_id INTEGER DEFAULT NULL, --TODO, auto completed or manual assign?

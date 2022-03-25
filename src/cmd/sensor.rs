@@ -183,7 +183,8 @@ async fn fb161_sensor_velocity_task(db: Db, s: Sensor) {
             _ = interval_100ms.tick() => {
                 odo += speed / 36000.0;
                 let sspeed = format!(r#"{{"speed":{},"odo":{}}}"#, speed, odo);
-                db.set(s.key.clone(), sspeed.into(), None);
+                db.set(s.key.clone(), sspeed.clone().into(), None);
+                db.publish(&s.key, sspeed.into());
                 speed += 0.1;
                 if speed > 200.0 {
                     speed = 0.0;
@@ -207,7 +208,8 @@ async fn fb161_sensor_location_task(db: Db, s: Sensor) {
             _ = interval_1s.tick() => {
                 let cmd = format!(r#"{{"logitude":{},"latitude":{},"altitude":{},"speed_avg":{}}}"#,
                                      logitude, latitude, altitude, speed_avg);
-                db.set(s.key.clone(), cmd.into(), None);
+                db.set(s.key.clone(), cmd.clone().into(), None);
+                db.publish(&s.key, cmd.into());
                 logitude += 11.1;
                 latitude += 22.2;
                 altitude += 33.3;

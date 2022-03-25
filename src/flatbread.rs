@@ -171,6 +171,9 @@ impl Flatbread {
                 }
             }
         }
+        // TODO, SPEC 5.1.7.1 & 5.2.4, if moving(3km/hr, >5s),
+        // current driver action is driving,
+        // other driver(s) action is standby
     }
 
     pub(crate) async fn insert_location(&mut self, value: Option<Bytes>) -> Result<i64, sqlx::Error> {
@@ -201,6 +204,7 @@ impl Flatbread {
     pub(crate) async fn update_driver(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         let driver: CacheDriver = serde_json::from_slice(value).unwrap();
         //println!("driver {:?}", driver);
+
         match sqlx::query!(r#"INSERT INTO driver ( account, action ) VALUES ( ?1, ?2 )"#,
         driver.account, driver.action).execute(&mut self.conn).await {
             Ok(r) => {

@@ -33,6 +33,14 @@ BEGIN
     UPDATE velocity SET location_id = (SELECT id from location ORDER BY id DESC LIMIT 1) WHERE id = NEW.id;
 END;
 
+-- SPEC 5.2.5
+CREATE TRIGGER velocity_stop_driver_stop_auto AFTER INSERT ON velocity
+    WHEN NEW.speed = 0.0 AND (SELECT action from driver ORDER BY id DESC LIMIT 1) = 1
+BEGIN
+    INSERT INTO driver (account, action, travel_threshold_id, rest_threshold_id)
+    SELECT account, 2, travel_threshold_id, rest_threshold_id from driver WHERE action = 1 ORDER BY id DESC LIMIT 1;
+END;
+
 -- 365(d) * 24(h) * 60(m) = 525600
 --CREATE TRIGGER location_rows_525600 AFTER INSERT ON location
 --    WHEN (SELECT COUNT(*) FROM location) > 525600
@@ -95,6 +103,14 @@ BEGIN
     UPDATE driver SET (travel_threshold_id,rest_threshold_id) = (SELECT travel_threshold.id,rest_threshold.id from travel_threshold,rest_threshold
         ORDER BY travel_threshold.id + rest_threshold.id DESC LIMIT 1) WHERE id = NEW.id;
 END;
+
+-- SPEC 5.2.4
+-- manual insert driver/driving after velocity ??/5s pass
+--CREATE TRIGGER driver_driving_force_other_standby BEFORE INSERT ON driver
+--    WHEN NEW.action = 1
+--BEGIN
+--    TODO
+--END;
 
 -- autocomplete event's velocity
 -- test:
