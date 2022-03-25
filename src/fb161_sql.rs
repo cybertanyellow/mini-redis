@@ -1,4 +1,4 @@
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use std::env;
 use bytes::Bytes;
 use sqlx::sqlite::{*, SqlitePool};
@@ -147,7 +147,7 @@ impl FbSql {
         }
     }
 
-    pub(crate) async fn insert_velocity(&mut self, value: Option<Bytes>) -> Result<i64, sqlx::Error> {
+    async fn _insert_velocity(&mut self, value: Option<Bytes>) -> Result<i64, sqlx::Error> {
         if let Some(value) = value {
             self.update_velocity(&value).await
         }
@@ -176,17 +176,15 @@ impl FbSql {
         // other driver(s) action is standby
     }
 
-    pub(crate) async fn insert_location(&mut self, value: Option<Bytes>) -> Result<i64, sqlx::Error> {
+    async fn insert_location(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         let mut location = CacheLocation {
             logitude: 0.0,
             latitude: 0.0,
             altitude: 0.0,
             speed_avg: 0.0,
         };
-        if let Some(value) = value {
-            if let Ok(json) = serde_json::from_slice(&value) {
-                location = json;
-            }
+        if let Ok(json) = serde_json::from_slice(&value) {
+            location = json;
         }
         match sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
         location.logitude, location.latitude, location.altitude, location.speed_avg).execute(&mut self.conn).await {
@@ -201,7 +199,8 @@ impl FbSql {
             }
         }
     }
-    pub(crate) async fn update_driver(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
+
+    async fn update_driver(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         let driver: CacheDriver = serde_json::from_slice(value).unwrap();
         //println!("driver {:?}", driver);
 
@@ -222,7 +221,12 @@ impl FbSql {
         }
     }
 
-    pub(crate) async fn update_calibration(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
+    async fn update_vehicle_unit(&mut self, _value: &Bytes) -> Result<i64, sqlx::Error> {
+        warn!("TODO");
+        Ok(-1)
+    }
+
+    async fn update_calibration(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         /* TODO change odo/mileage */
         let cal: CacheCalibration = serde_json::from_slice(value).unwrap();
         println!("calibration {:?}", cal);
@@ -241,7 +245,7 @@ impl FbSql {
         }
     }
 
-    pub(crate) async fn update_time_date(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
+    async fn update_time_date(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         /* TODO change system time */
         let tm: CacheTimeDate = serde_json::from_slice(value).unwrap();
         //println!("date-time {:?}", tm);
@@ -305,7 +309,7 @@ impl FbSql {
 
     }
 
-    pub(crate) async fn update_event(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
+    async fn update_event(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         if let Ok(event) = serde_json::from_slice::<CacheEvent>(value) {
             debug!("event {:?}", event);
 
@@ -343,7 +347,7 @@ impl FbSql {
         }
     }
 
-    pub(crate) async fn update_error(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
+    async fn update_error(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         if let Ok(error) = serde_json::from_slice::<CacheError>(value) {
             match (error.fault_start, error.fault_end) {
                 (Some(fault_start), Some(fault_end)) => {
@@ -410,7 +414,7 @@ impl FbSql {
         }
     }
 
-    pub(crate) async fn update_travel_threshold(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
+    async fn update_travel_threshold(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         if let Ok(thresh) = serde_json::from_slice::<CacheTravelThreshold>(value) {
             match (thresh.timestamp_before, thresh.timestamp_after, thresh.threshold_before) {
                 (Some(ts_before), Some(ts_after), Some(before)) => {
@@ -534,7 +538,7 @@ impl FbSql {
         }
     }
 
-    pub(crate) async fn update_rest_threshold(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
+    async fn update_rest_threshold(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         if let Ok(thresh) = serde_json::from_slice::<CacheRestThreshold>(value) {
             match (thresh.timestamp_before, thresh.timestamp_after, thresh.threshold_before) {
                 (Some(ts_before), Some(ts_after), Some(before)) => {
@@ -730,5 +734,92 @@ impl FbSql {
             error!("velocity format invalid - {:?}", value);
             Ok(-1) /*TODO*/
         }
+    }
+
+    pub(crate) async fn commit(&mut self, key: &str, val: &Bytes) -> Result<i64, sqlx::Error> {
+        match key {
+            "velocity" => {
+                match self.update_velocity(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("velocity inserting error: {}", e);
+                    },
+                }
+            },
+            "location" => {
+                match self.insert_location(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("velocity inserting error: {}", e);
+                    },
+                }
+            },
+            "driver" => {
+                match self.update_driver(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("Error inserting driver: {}", e);
+                    },
+                }
+            },
+            "event" => {
+                match self.update_event(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("Error inserting event: {}", e);
+                    },
+                }
+            },
+            "error" => {
+                match self.update_error(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("Error inserting error: {}", e);
+                    },
+                }
+            },
+            "travel-threshold" => {
+                match self.update_travel_threshold(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("travel-threshold inserting error: {}", e);
+                    },
+                }
+            },
+            "rest-threshold" => {
+                match self.update_rest_threshold(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("rest-threshold inserting error: {}", e);
+                    },
+                }
+            },
+            "vehicle-unit" => {
+                match self.update_vehicle_unit(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("Error inserting calibration: {}", e);
+                    },
+                }
+            },
+            "calibration" => {
+                match self.update_calibration(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("Error inserting calibration: {}", e);
+                    },
+                }
+            },
+            "time-date" => {
+                match self.update_time_date(val).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("Error inserting time-date: {}", e);
+                    },
+                }
+            },
+            _ => { warn!("Unknown key-{} with value-{:?}", key, val)},
+        }
+        Ok(-1)
     }
 }

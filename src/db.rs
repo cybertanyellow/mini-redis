@@ -4,7 +4,7 @@ use tokio::time::{self, Duration, Instant};
 use bytes::Bytes;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 use tokio::sync::mpsc;
 use crate::fb161_sql::FbSql;
 
@@ -150,9 +150,11 @@ impl Db {
 
         // Start the background task.
         tokio::spawn(purge_expired_tasks(shared.clone()));
-        tokio::spawn(fb161_period_cache2sql_tasks(shared.clone(), rx));
 
-        Db { shared }
+        let db = Db { shared };
+        tokio::spawn(fb161_db_task(db.clone(), rx));
+
+        db
     }
 
     /// Get the value associated with a key.
@@ -278,8 +280,6 @@ impl Db {
     pub(crate) fn publish(&self, key: &str, value: Bytes) -> usize {
         let state = self.shared.state.lock().unwrap();
 
-        tokio::spawn(request_tx_task(state.request.clone(), ("publish".to_string(), key.to_string(), value.clone())));
-
         state
             .pub_sub
             .get(key)
@@ -306,6 +306,7 @@ impl Db {
         drop(state);
         self.shared.background_task.notify_one();
     }
+
 }
 
 impl Shared {
@@ -433,7 +434,7 @@ async fn request_tx_task(ch: mpsc::Sender<(String, String, Bytes)>, msg: (String
     ch.send(msg).await.unwrap();
 }
 
-async fn fb161_period_cache2sql_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, String, Bytes)>) {
+/*async fn fb161_period_cache2sql_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, String, Bytes)>) {
     let mut interval_500ms = time::interval(time::Duration::from_millis(500));
     let mut interval_1s = time::interval(time::Duration::from_millis(1000));
     let mut flatbread = FbSql::new().await;
@@ -544,4 +545,72 @@ async fn fb161_period_cache2sql_tasks(shared: Arc<Shared>, mut request: mpsc::Re
     }
 
     debug!("FB161 period update/insert background task shut down")
+}*/
+
+async fn fb161_db_task(db: Db, mut request: mpsc::Receiver<(String, String, Bytes)>) {
+    let mut interval_velocity = time::interval(time::Duration::from_millis(500));
+    let mut interval_location = time::interval(time::Duration::from_millis(1000));
+    let mut fb_sql = FbSql::new().await;
+
+    let mut speed = 0.0;
+    let mut odo = 100.0;
+
+    let mut logitude = 0.0;
+    let mut latitude = 0.0;
+    let mut altitude = 0.0;
+    let mut speed_avg = 0.0;
+
+    //TODO If the shutdown flag is set, then the task should exit.
+    loop {
+        tokio::select! {
+            _ = interval_velocity.tick() => {
+                db_velocity_task_unit(&db, &mut speed, &mut odo);
+            }
+            _ = interval_location.tick() => {
+                db_location_task_unit(&db, &mut logitude, &mut latitude, &mut altitude, &mut speed_avg);
+            }
+            Some((cmd, key, val)) = request.recv() => {
+                match cmd.as_str() {
+                    "set" => {
+                        if let Some(ofs) = key.find("fb161/") {
+                            let _ = fb_sql.commit(&key[(ofs+6)..], &val).await;
+                            db.publish(&key, val);
+                        }
+                        else {
+                            dbg!("set key-{} not match");
+                        }
+                    },
+                    "publish" => {
+                        dbg!("publish key-{} TODO");
+                    },
+                    _ => {
+                        warn!("cmd-{} key-{} value {:#?}", cmd, key, val.to_ascii_lowercase());
+                    }
+                }
+            }
+        }
+    }
+
+    //TODO debug!("FB161 internal task shut down")
+}
+
+fn db_velocity_task_unit(db: &Db, speed: &mut f64, odo: &mut f64) {
+    let cmd = format!(r#"{{"speed":{},"odo":{}}}"#, speed, odo);
+    *odo += *speed / 36000.0;
+
+    db.set("fb161/velocity".into(), cmd.into(), None);
+    *speed += 0.1;
+    if *speed > 200.0 {
+        *speed = 0.0;
+    }
+}
+
+fn db_location_task_unit(db: &Db, logitude: &mut f64, latitude: &mut f64, altitude: &mut f64, speed_avg: &mut f64) {
+    let cmd = format!(r#"{{"logitude":{},"latitude":{},"altitude":{},"speed_avg":{}}}"#,
+                      logitude, latitude, altitude, speed_avg);
+    db.set("fb161/location".into(), cmd.into(), None);
+    *logitude += 11.1;
+    *latitude += 22.2;
+    *altitude += 33.3;
+    *speed_avg += 11.1;
 }
