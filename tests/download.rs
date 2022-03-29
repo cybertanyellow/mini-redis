@@ -5,6 +5,8 @@ use tokio::io::{SeekFrom, AsyncSeekExt, BufWriter};
 use std::env;
 use bytes::Bytes;
 use sqlx::sqlite::SqlitePool;
+use sqlx::Sqlite;
+use sqlx::pool::PoolConnection;
 //use sqlx::pool::PoolConnection;
 //use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::chrono::{NaiveDateTime, NaiveDate};
@@ -17,6 +19,10 @@ use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
 
 use serde_big_array::BigArray;
+use anyhow::Result;
+use anyhow::Error;
+use anyhow::anyhow;
+use std::mem;
 
 #[tokio::test]
 async fn file_read_write() {
@@ -289,12 +295,22 @@ async fn test_bcd() {
     assert_eq!(bcd(80), 0x80);
 }
 
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+struct DownloadFile {
+    num: u16,
+    // 1th block
+    // 2th block
+    // ...
+    //checksum: u8,
+}
+
 // block format - [code][name][len][data]
 // code: 1byte
 // name: 18bytes
 // len: 4bytes
 // data: len bytes
-#[derive(PartialEq, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
 struct DownloadBlock {
     code: u8,
     name: [u8; 18],
@@ -322,12 +338,113 @@ struct EventErrorInformation {
     date: Vec<u8>,
 }
 
+async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
+    let mut block_velocity: DownloadBlock = DownloadBlock {
+        code: 0x01,
+        name: *b"velocity-informati",
+        len: 0x11,
+    };
+    let data_velocity = DetailVelocityInformation {
+        num: 1,
+        date: *b"\x20\x22\x03\x28\x11\x58\x13",
+        speed: [1; 120],
+    };
+
+    if let Ok(prev_pos) = writer.seek(SeekFrom::Current(0)).await {
+        let data_ofs = prev_pos + mem::size_of::<DownloadBlock>() as u64;
+        writer.seek(SeekFrom::Start(data_ofs)).await?;
+        let data_velocity = bincode::serialize(&data_velocity).unwrap();
+        /*let ofs_velocity = block_event.len() + data_event.len();
+          let prev_seek = writer.seek(SeekFrom::Start(ofs_velocity.try_into().unwrap())).await.unwrap();*/
+        let wn = writer.write_all(&data_velocity).await;
+        assert!(wn.is_ok());
+        //assert_eq!(writer.seek(SeekFrom::Current(0)).await.unwrap(), prev_seek + (block_velocity.len() + data_velocity.len()) as u64);
+        if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
+            writer.seek(SeekFrom::Start(prev_pos)).await?;
+            block_velocity.len = data_velocity.len() as u32;
+            let block_velocity = bincode::serialize(&block_velocity)?;
+            let wn = writer.write_all(&block_velocity).await;
+            assert!(wn.is_ok());
+
+            let _ = writer.seek(SeekFrom::Start(curr_pos)).await;
+
+            //writer.flush().await.unwrap();
+            Ok(curr_pos - prev_pos)
+        }
+        else {
+            //Err(Error::new(ErrorKind::Other, "current seek error"))
+            Err(anyhow!("current seek error"))
+        }
+    }
+    else {
+        //Err(Error::new(ErrorKind::Other, "previous seek error"))
+        Err(anyhow!("previous seek error"))
+    }
+}
+
+async fn fb161_download_event(writer: &mut BufWriter<File>) -> Result<u64> {
+    let mut block_event: DownloadBlock = DownloadBlock {
+        code: 0x00,
+        name: *b"event-error-inform",
+        len: 0x22,
+    };
+    let data_event = EventErrorInformation {
+        cnt: 8,
+        date: vec![0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88],
+    };
+    if let Ok(prev_pos) = writer.seek(SeekFrom::Current(0)).await {
+        let data_ofs = prev_pos + mem::size_of::<DownloadBlock>() as u64;
+        let wn = writer.seek(SeekFrom::Start(data_ofs)).await;
+        assert!(wn.is_ok());
+
+        println!("[debug] pre_pos-{} data_ofs-{} DownloadBlock-{}", prev_pos, data_ofs, mem::size_of::<DownloadBlock>());
+
+        let data_event = bincode::serialize(&data_event).unwrap();
+        let wn = writer.write_all(&data_event).await;
+        assert!(wn.is_ok());
+
+        //writer.flush().await.unwrap();
+        if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
+            writer.seek(SeekFrom::Start(prev_pos)).await?;
+            block_event.len = data_event.len() as u32;
+            let block_event = bincode::serialize(&block_event)?;
+            let wn = writer.write_all(&block_event).await;
+            assert!(wn.is_ok());
+
+            let _ = writer.seek(SeekFrom::Start(curr_pos)).await;
+
+            Ok(curr_pos - prev_pos)
+        }
+        else {
+            //Err(Error::new(ErrorKind::Other, "current seek error"))
+            Err(anyhow!("current seek error"))
+        }
+    }
+    else {
+        //Err(Error::new(ErrorKind::Other, "previous seek error"))
+        Err(anyhow!("previous seek error"))
+    }
+}
+
+async fn fb161_sql_conn() -> sqlx::Result<PoolConnection<Sqlite>> {
+    dotenv().ok();
+
+    let url: String = env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://:memory:".to_string());
+    let pool: SqlitePool = SqlitePool::connect(&url).await.unwrap();
+    pool.acquire().await
+}
+
 #[tokio::test]
 async fn test_fb161_download() {
+    let sql_conn = fb161_sql_conn();
+
     if let Ok(file)  = File::create("/tmp/fb161_xxxxx_xxxxx.vdr").await {
         let mut writer = BufWriter::new(file);
 
-        let block_velocity: DownloadBlock = DownloadBlock {
+        let _ = fb161_download_event(&mut writer).await;
+        let _ = fb161_download_velocity(&mut writer).await;
+
+        /*let block_velocity: DownloadBlock = DownloadBlock {
             code: 0x01,
             name: *b"velocity-informati",
             len: 0x11,
@@ -353,16 +470,17 @@ async fn test_fb161_download() {
         let block_velocity = bincode::serialize(&block_velocity).unwrap();
         let data_velocity = bincode::serialize(&data_velocity).unwrap();
         let ofs_velocity = block_event.len() + data_event.len();
-        writer.seek(SeekFrom::Start(ofs_velocity.try_into().unwrap())).await.unwrap();
+        let prev_seek = writer.seek(SeekFrom::Start(ofs_velocity.try_into().unwrap())).await.unwrap();
         let wn = writer.write_all(&block_velocity).await;
         assert!(wn.is_ok());
         let wn = writer.write_all(&data_velocity).await;
         assert!(wn.is_ok());
+        assert_eq!(writer.seek(SeekFrom::Current(0)).await.unwrap(), prev_seek + (block_velocity.len() + data_velocity.len()) as u64);
         writer.seek(SeekFrom::Start(0)).await.unwrap();
         let wn = writer.write_all(&block_event).await;
         assert!(wn.is_ok());
         let wn = writer.write_all(&data_event).await;
-        assert!(wn.is_ok());
+        assert!(wn.is_ok());*/
 
         writer.flush().await.unwrap();
     }
