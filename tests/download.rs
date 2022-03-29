@@ -8,7 +8,7 @@ use sqlx::pool::PoolConnection;
 use sqlx::types::chrono::{NaiveDateTime, NaiveDate};
 use serde::{Deserialize, Serialize};
 //use chrono::serde::{/*ts_milliseconds, */ts_seconds};
-use chrono::{Timelike, Datelike};
+use chrono::{Timelike, Datelike, Duration};
 use tokio_stream::StreamExt;
 use dotenv::dotenv;
 use byteorder::{BigEndian, LittleEndian, WriteBytesExt, ReadBytesExt};
@@ -128,8 +128,7 @@ fn bcd(n: u8) -> u8 {
 async fn select_velocity(start_datetime: Option<NaiveDateTime>, limit: u16) -> (Option<NaiveDateTime>, Vec<OutVelocity>) {
     dotenv().ok();
 
-    //let mut speeds: Vec<u8> = Vec::new();
-    let mut next_datetime = None;
+    let mut prev_dt = None;
     let mut velocities: Vec<OutVelocity> = Vec::new();
     let mut cnt: u8 = 0;
 
@@ -150,30 +149,54 @@ async fn select_velocity(start_datetime: Option<NaiveDateTime>, limit: u16) -> (
         speeds: Vec::new(),
     };
 
-    while let Some(row) = s.try_next().await.unwrap() {
-        let speed: u8 = row.speed.unwrap_or(0.0) as u8;
-        let mut year: u16 = 0;
-        let mut month: u8 = 0;
-        let mut day: u8 = 0;
-        let mut hour: u8 = 0;
-        let mut minute: u8 = 0;
-        let mut second: u8 = 0;
+    while let Ok(Some(row)) = s.try_next().await {
+        if cnt != 0 {
+            if let Some(now_ts) = row.timestamp {
+                if let Some(prev_ts) = prev_dt {
+                    let diff = now_ts.signed_duration_since(prev_ts);
 
-        if let Some(tss) = row.timestamp {
-            //ndt = NaiveDateTime::parse_from_str(&tss, "%Y-%m-%d %H:%M:%S%.3f").ok();
-            //println!("{} {}{}{}{}{}{}", speed, tss.year(), tss.month(), tss.day(), tss.hour(), tss.minute(), tss.second());
-            year = tss.year() as u16;
-            month = tss.month() as u8;
-            day = tss.day() as u8;
-            hour = tss.hour() as u8;
-            minute = tss.minute() as u8;
-            second = tss.second() as u8;
+                    if diff.num_seconds() > 0 {
+                        let num_milliseconds = diff.num_milliseconds();
+                        let mut cycle = (num_milliseconds as f32 / 550.0).round() as i32;
+
+                        while cycle > 0 && cnt < 120 {
+                            println!("[debug] extra num_milliseconds-{} cnt-{}", num_milliseconds, cnt);
+                            WriteBytesExt::write_u8(&mut out_velocity.speeds, 0).unwrap();
+                            cnt += 1;
+                            cycle -= 1;
+                        }
+                        if cnt == 120 {
+                            velocities.push(out_velocity);
+
+                            cnt = 0;
+                            out_velocity = OutVelocity {
+                                start: Vec::new(),
+                                speeds: Vec::new(),
+                            };
+                        }
+                    }
+                }
+            }
         }
-        next_datetime = row.timestamp;
-        //speeds.push(speed);
-        WriteBytesExt::write_u8(&mut out_velocity.speeds, speed).unwrap();
 
         if cnt == 0 {
+            let mut year: u16 = 0;
+            let mut month: u8 = 0;
+            let mut day: u8 = 0;
+            let mut hour: u8 = 0;
+            let mut minute: u8 = 0;
+            let mut second: u8 = 0;
+
+            if let Some(ts) = row.timestamp {
+                //ndt = NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M:%S%.3f").ok();
+                //println!("{} {}{}{}{}{}{}", speed, ts.year(), ts.month(), ts.day(), ts.hour(), ts.minute(), ts.second());
+                year = ts.year() as u16;
+                month = ts.month() as u8;
+                day = ts.day() as u8;
+                hour = ts.hour() as u8;
+                minute = ts.minute() as u8;
+                second = ts.second() as u8;
+            }
             //WriteBytesExt::write_u16::<BigEndian>(&mut out_velocity.start, year).unwrap();
             assert_eq!(year, 2022);
             WriteBytesExt::write_u8(&mut out_velocity.start, bcd((year / 100).try_into().unwrap())).unwrap();
@@ -185,6 +208,10 @@ async fn select_velocity(start_datetime: Option<NaiveDateTime>, limit: u16) -> (
             WriteBytesExt::write_u8(&mut out_velocity.start, bcd(second)).unwrap();
             println!("{}{}{}{}{}{} - {:?}", year, month, day, hour, minute, second, out_velocity.start);
         }
+
+        let speed: u8 = row.speed.unwrap_or(0.0) as u8;
+        WriteBytesExt::write_u8(&mut out_velocity.speeds, speed).unwrap();
+        prev_dt = row.timestamp;
         cnt += 1;
 
         if cnt == 120 {
@@ -206,8 +233,7 @@ async fn select_velocity(start_datetime: Option<NaiveDateTime>, limit: u16) -> (
         velocities.push(out_velocity);
     }
 
-    //(next_datetime, speeds)
-    (next_datetime, velocities)
+    (prev_dt, velocities)
 }
 
 #[tokio::test]
@@ -231,7 +257,8 @@ async fn test_fb161_dl_velocity() {
     let block_name = b"detail-velocity-information";
     //file.write_all(name).await.unwrap(); /* chinese? */
     wtr.append(&mut block_name.to_vec());
-    let start_datetime = NaiveDate::from_ymd(2022, 3, 28).and_hms(11, 33, 38);
+    //let start_datetime = NaiveDate::from_ymd(2022, 3, 28).and_hms(11, 33, 38);
+    let start_datetime = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
 
     if let (Some(_dt), v) = select_velocity(Some(start_datetime), 65535).await {
         let block_len = v.len() * (2 + 7 + 120);
@@ -245,9 +272,8 @@ async fn test_fb161_dl_velocity() {
     else {
     }
 
-    // checksum
-    //let mut wtr = Vec::new();
-    WriteBytesExt::write_u16::<BigEndian>(&mut wtr, 1).unwrap();
+    let block_checksum: u8 = 0xFA;
+    WriteBytesExt::write_u8(&mut wtr, block_checksum).unwrap();
 
     file.write_all(&wtr).await.unwrap();
 }
