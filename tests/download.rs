@@ -1,19 +1,22 @@
-use tokio::io::{self, AsyncWriteExt, AsyncReadExt};
+use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::fs::File;
+use tokio::io::{SeekFrom, AsyncSeekExt, BufWriter};
+//use tokio::prelude::Future;
 use std::env;
 use bytes::Bytes;
-use sqlx::sqlite::{*, SqlitePool};
-use sqlx::pool::PoolConnection;
+use sqlx::sqlite::SqlitePool;
+//use sqlx::pool::PoolConnection;
 //use sqlx::types::chrono::{DateTime, Utc};
 use sqlx::types::chrono::{NaiveDateTime, NaiveDate};
 use serde::{Deserialize, Serialize};
 //use chrono::serde::{/*ts_milliseconds, */ts_seconds};
-use chrono::{Timelike, Datelike, Duration};
+use chrono::{Timelike, Datelike};
 use tokio_stream::StreamExt;
 use dotenv::dotenv;
-use byteorder::{BigEndian, LittleEndian, WriteBytesExt, ReadBytesExt};
-//use bincode::{config, Decode, Encode};
+use byteorder::{BigEndian, LittleEndian, WriteBytesExt};
 use std::convert::TryInto;
+
+use serde_big_array::BigArray;
 
 #[tokio::test]
 async fn file_read_write() {
@@ -125,7 +128,7 @@ fn bcd(n: u8) -> u8 {
     r
 }
 
-async fn select_velocity(start_datetime: Option<NaiveDateTime>, limit: u16) -> (Option<NaiveDateTime>, Vec<OutVelocity>) {
+async fn select_velocity(start_datetime: Option<NaiveDateTime>, _limit: u32) -> (Option<NaiveDateTime>, Vec<OutVelocity>) {
     dotenv().ok();
 
     let mut prev_dt = None;
@@ -141,8 +144,10 @@ async fn select_velocity(start_datetime: Option<NaiveDateTime>, limit: u16) -> (
     let pool: SqlitePool = SqlitePool::connect(&url).await.unwrap();
     let mut conn = pool.acquire().await.unwrap();
 
-    let mut s = sqlx::query_as!(MyVelocity, r#"select speed,timestamp as "timestamp: _" from velocity where timestamp > ?1 limit ?2"#,
-                                timestamp, limit).fetch(&mut conn);
+    /*let mut s = sqlx::query_as!(MyVelocity, r#"select speed,timestamp as "timestamp: _" from velocity where timestamp > ?1 limit ?2"#,
+                                timestamp, limit).fetch(&mut conn);*/
+    let mut s = sqlx::query_as!(MyVelocity, r#"select speed,timestamp as "timestamp: _" from velocity where timestamp > ?1"#,
+                                timestamp).fetch(&mut conn);
 
     let mut out_velocity = OutVelocity {
         start: Vec::new(),
@@ -238,7 +243,7 @@ async fn select_velocity(start_datetime: Option<NaiveDateTime>, limit: u16) -> (
 
 #[tokio::test]
 async fn test_fb161_dl_velocity() {
-    let mut file = File::create("/tmp/fb161_velocity.txt").await.unwrap();
+    let mut file = File::create("/tmp/fb161_xxxxx_xxxxx.vdr").await.unwrap();
 
     // block number
     let block_num: u16 = 0x01;
@@ -282,4 +287,86 @@ async fn test_fb161_dl_velocity() {
 async fn test_bcd() {
     assert_eq!(bcd(19), 0x19);
     assert_eq!(bcd(80), 0x80);
+}
+
+// block format - [code][name][len][data]
+// code: 1byte
+// name: 18bytes
+// len: 4bytes
+// data: len bytes
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+struct DownloadBlock {
+    code: u8,
+    name: [u8; 18],
+    len: u32,
+    //data: DownloadBlockEntry,
+}
+
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+enum DownloadBlockEntry {
+    EventErrorInformation(EventErrorInformation),
+    DetailVelocityInformation(DetailVelocityInformation),
+}
+
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+struct DetailVelocityInformation {
+    num: u16,
+    date: [u8; 7],
+    #[serde(with = "BigArray")]
+    speed: [u8; 120],
+}
+
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+struct EventErrorInformation {
+    cnt: u8,
+    date: Vec<u8>,
+}
+
+#[tokio::test]
+async fn test_fb161_download() {
+    if let Ok(file)  = File::create("/tmp/fb161_xxxxx_xxxxx.vdr").await {
+        let mut writer = BufWriter::new(file);
+
+        let block_velocity: DownloadBlock = DownloadBlock {
+            code: 0x01,
+            name: *b"velocity-informati",
+            len: 0x11,
+        };
+        let data_velocity = DetailVelocityInformation {
+            num: 1,
+            date: *b"\x20\x22\x03\x28\x11\x58\x13",
+            speed: [1; 120],
+        };
+
+        let block_event: DownloadBlock = DownloadBlock {
+            code: 0x00,
+            name: *b"event-error-inform",
+            len: 0x22,
+        };
+        let data_event = EventErrorInformation {
+            cnt: 1,
+            date: vec![0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88],
+        };
+
+        let block_event = bincode::serialize(&block_event).unwrap();
+        let data_event = bincode::serialize(&data_event).unwrap();
+        let block_velocity = bincode::serialize(&block_velocity).unwrap();
+        let data_velocity = bincode::serialize(&data_velocity).unwrap();
+        let ofs_velocity = block_event.len() + data_event.len();
+        writer.seek(SeekFrom::Start(ofs_velocity.try_into().unwrap())).await.unwrap();
+        let wn = writer.write_all(&block_velocity).await;
+        assert!(wn.is_ok());
+        let wn = writer.write_all(&data_velocity).await;
+        assert!(wn.is_ok());
+        writer.seek(SeekFrom::Start(0)).await.unwrap();
+        let wn = writer.write_all(&block_event).await;
+        assert!(wn.is_ok());
+        let wn = writer.write_all(&data_event).await;
+        assert!(wn.is_ok());
+
+        writer.flush().await.unwrap();
+    }
+    else {
+        assert!(false);
+    }
 }

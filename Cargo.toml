@@ -38,6 +38,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dotenv = "0.15.0"
 byteorder = "1"
 bincode = "1"
+serde-big-array = "0.4"
 
 [dev-dependencies]
 # Enable test-utilities in dev mode only. This is mostly for tests.
