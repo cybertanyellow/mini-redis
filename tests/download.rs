@@ -1,3 +1,5 @@
+use tracing::{debug, warn};
+//use tracing::{error, info};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use tokio::fs::File;
 use tokio::io::{SeekFrom, AsyncSeekExt, BufWriter};
@@ -20,7 +22,7 @@ use std::convert::TryInto;
 
 use serde_big_array::BigArray;
 use anyhow::Result;
-use anyhow::Error;
+//use anyhow::Error;
 use anyhow::anyhow;
 use std::mem;
 
@@ -116,7 +118,7 @@ async fn write_struct2file() {
     assert_eq!(2, 2);
 }
 
-struct MyVelocity {
+struct SqlVelocity {
     speed: Option<f32>,
     timestamp: Option<NaiveDateTime>,
 }
@@ -150,9 +152,9 @@ async fn select_velocity(start_datetime: Option<NaiveDateTime>, _limit: u32) -> 
     let pool: SqlitePool = SqlitePool::connect(&url).await.unwrap();
     let mut conn = pool.acquire().await.unwrap();
 
-    /*let mut s = sqlx::query_as!(MyVelocity, r#"select speed,timestamp as "timestamp: _" from velocity where timestamp > ?1 limit ?2"#,
+    /*let mut s = sqlx::query_as!(SqlVelocity, r#"select speed,timestamp as "timestamp: _" from velocity where timestamp > ?1 limit ?2"#,
                                 timestamp, limit).fetch(&mut conn);*/
-    let mut s = sqlx::query_as!(MyVelocity, r#"select speed,timestamp as "timestamp: _" from velocity where timestamp > ?1"#,
+    let mut s = sqlx::query_as!(SqlVelocity, r#"select speed,timestamp as "timestamp: _" from velocity where timestamp > ?1"#,
                                 timestamp).fetch(&mut conn);
 
     let mut out_velocity = OutVelocity {
@@ -338,32 +340,123 @@ struct EventErrorInformation {
     date: Vec<u8>,
 }
 
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockVelocity {
+    code: u8,
+    name: [u8; 18],
+    len: u32,
+    num: u16,
+}
+
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+struct DownloadEntryVelocity {
+    date_time: [u8; 7],
+    #[serde(with = "BigArray")]
+    speed: [u8; 120],
+}
+
+
 async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
-    let mut block_velocity: DownloadBlock = DownloadBlock {
+    let mut block: DownloadBlockVelocity = DownloadBlockVelocity {
         code: 0x01,
         name: *b"velocity-informati",
         len: 0x11,
-    };
-    let data_velocity = DetailVelocityInformation {
-        num: 1,
-        date: *b"\x20\x22\x03\x28\x11\x58\x13",
-        speed: [1; 120],
+        num: 0x01,
     };
 
     if let Ok(prev_pos) = writer.seek(SeekFrom::Current(0)).await {
-        let data_ofs = prev_pos + mem::size_of::<DownloadBlock>() as u64;
+        let data_ofs = prev_pos + mem::size_of::<DownloadBlockVelocity>() as u64;
         writer.seek(SeekFrom::Start(data_ofs)).await?;
-        let data_velocity = bincode::serialize(&data_velocity).unwrap();
-        /*let ofs_velocity = block_event.len() + data_event.len();
-          let prev_seek = writer.seek(SeekFrom::Start(ofs_velocity.try_into().unwrap())).await.unwrap();*/
-        let wn = writer.write_all(&data_velocity).await;
-        assert!(wn.is_ok());
-        //assert_eq!(writer.seek(SeekFrom::Current(0)).await.unwrap(), prev_seek + (block_velocity.len() + data_velocity.len()) as u64);
+
+        if let Ok(mut conn) = fb161_sql_conn().await {
+            let mut s = sqlx::query_as!(SqlVelocity, r#"select speed,timestamp as "timestamp: _" from velocity"#)
+                .fetch(&mut conn);
+
+            let mut prev_timestamp = NaiveDate::from_ymd(1970, 1, 1).and_hms(0, 0, 0);
+            let mut index: usize = 0;
+            let mut entry = DownloadEntryVelocity {
+                date_time: *b"\x19\x70\x01\x01\x00\x00\x00",
+                speed: [0; 120],
+            };
+            while let Ok(Some(row)) = s.try_next().await {
+                let SqlVelocity {
+                    speed,
+                    timestamp,
+                } = row;
+                match (speed, timestamp) {
+                    (Some(speed), Some(timestamp)) => {
+                        if index != 0 {
+                            let diff = timestamp.signed_duration_since(prev_timestamp);
+
+                            if diff.num_seconds() > 1 {
+                                let lost = (diff.num_milliseconds() as f32 / 550.0).round() as usize;
+                                //debug!("[debug] {:?} - {:?} = {:?} => {} {}", timestamp, prev_timestamp, diff, lost, index);
+
+                                if lost >= (120 - index) {
+                                    if let Ok(entry) = bincode::serialize(&entry) {
+                                        let _ = writer.write_all(&entry).await?;
+                                    }
+
+                                    index = 0;
+                                    entry = DownloadEntryVelocity {
+                                        date_time: *b"\x19\x70\x01\x01\x00\x00\x00",
+                                        speed: [0; 120],
+                                    };
+                                }
+                                else {
+                                    index += lost;
+                                }
+                            }
+                        }
+                        if index == 0 {
+                            debug!("{:?} {:?}", speed, timestamp);
+                            block.num += 1;
+                            entry.date_time[0] = bcd((timestamp.year() / 100) as u8);
+                            entry.date_time[1] = bcd((timestamp.year() % 100) as u8);
+                            entry.date_time[2] = bcd(timestamp.month() as u8);
+                            entry.date_time[3] = bcd(timestamp.day() as u8);
+                            entry.date_time[4] = bcd(timestamp.hour() as u8);
+                            entry.date_time[5] = bcd(timestamp.minute() as u8);
+                            entry.date_time[6] = bcd(timestamp.second() as u8);
+                        }
+                        prev_timestamp = timestamp;
+                        entry.speed[index] = speed as u8;
+                        index += 1;
+                    },
+                    (Some(speed), None) => {
+                        entry.speed[index] = speed as u8;
+                        index += 1;
+                    },
+                    _ => {
+                        warn!("{:?} {:?}", speed, timestamp);
+                    },
+                }
+                if index == 120 {
+                    if let Ok(entry) = bincode::serialize(&entry) {
+                        let _ = writer.write_all(&entry).await?;
+                    }
+
+                    index = 0;
+                    entry = DownloadEntryVelocity {
+                        date_time: *b"\x19\x70\x01\x01\x00\x00\x00",
+                        speed: [0; 120],
+                    };
+                }
+            }
+            // flush non-full pending entry
+            if index != 0 {
+                if let Ok(entry) = bincode::serialize(&entry) {
+                    let _ = writer.write_all(&entry).await?;
+                }
+            }
+        }
+
         if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
             writer.seek(SeekFrom::Start(prev_pos)).await?;
-            block_velocity.len = data_velocity.len() as u32;
-            let block_velocity = bincode::serialize(&block_velocity)?;
-            let wn = writer.write_all(&block_velocity).await;
+            block.len = (block.num as u32) * (mem::size_of::<DownloadEntryVelocity>()) as u32;
+            let block= bincode::serialize(&block)?;
+            let wn = writer.write_all(&block).await;
             assert!(wn.is_ok());
 
             let _ = writer.seek(SeekFrom::Start(curr_pos)).await;
@@ -372,12 +465,10 @@ async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
             Ok(curr_pos - prev_pos)
         }
         else {
-            //Err(Error::new(ErrorKind::Other, "current seek error"))
             Err(anyhow!("current seek error"))
         }
     }
     else {
-        //Err(Error::new(ErrorKind::Other, "previous seek error"))
         Err(anyhow!("previous seek error"))
     }
 }
@@ -436,52 +527,11 @@ async fn fb161_sql_conn() -> sqlx::Result<PoolConnection<Sqlite>> {
 
 #[tokio::test]
 async fn test_fb161_download() {
-    let sql_conn = fb161_sql_conn();
-
     if let Ok(file)  = File::create("/tmp/fb161_xxxxx_xxxxx.vdr").await {
         let mut writer = BufWriter::new(file);
 
         let _ = fb161_download_event(&mut writer).await;
         let _ = fb161_download_velocity(&mut writer).await;
-
-        /*let block_velocity: DownloadBlock = DownloadBlock {
-            code: 0x01,
-            name: *b"velocity-informati",
-            len: 0x11,
-        };
-        let data_velocity = DetailVelocityInformation {
-            num: 1,
-            date: *b"\x20\x22\x03\x28\x11\x58\x13",
-            speed: [1; 120],
-        };
-
-        let block_event: DownloadBlock = DownloadBlock {
-            code: 0x00,
-            name: *b"event-error-inform",
-            len: 0x22,
-        };
-        let data_event = EventErrorInformation {
-            cnt: 1,
-            date: vec![0x88, 0x88, 0x88, 0x88, 0x88, 0x88, 0x88],
-        };
-
-        let block_event = bincode::serialize(&block_event).unwrap();
-        let data_event = bincode::serialize(&data_event).unwrap();
-        let block_velocity = bincode::serialize(&block_velocity).unwrap();
-        let data_velocity = bincode::serialize(&data_velocity).unwrap();
-        let ofs_velocity = block_event.len() + data_event.len();
-        let prev_seek = writer.seek(SeekFrom::Start(ofs_velocity.try_into().unwrap())).await.unwrap();
-        let wn = writer.write_all(&block_velocity).await;
-        assert!(wn.is_ok());
-        let wn = writer.write_all(&data_velocity).await;
-        assert!(wn.is_ok());
-        assert_eq!(writer.seek(SeekFrom::Current(0)).await.unwrap(), prev_seek + (block_velocity.len() + data_velocity.len()) as u64);
-        writer.seek(SeekFrom::Start(0)).await.unwrap();
-        let wn = writer.write_all(&block_event).await;
-        assert!(wn.is_ok());
-        let wn = writer.write_all(&data_event).await;
-        assert!(wn.is_ok());*/
-
         writer.flush().await.unwrap();
     }
     else {
