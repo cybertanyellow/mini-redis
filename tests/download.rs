@@ -356,6 +356,23 @@ struct DownloadEntryVelocity {
     speed: [u8; 120],
 }
 
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockEvent {
+    code: u8,
+    name: [u8; 18],
+    len: u32,
+    num: u16,
+}
+
+#[derive(PartialEq, Debug, Serialize, Deserialize)]
+struct DownloadEntryEvent {
+    etype: u8,
+    start_ts: [u8; 7],
+    end_ts: [u8; 7],
+    //related: u8,
+}
+
 
 async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
     let mut block: DownloadBlockVelocity = DownloadBlockVelocity {
@@ -473,7 +490,8 @@ async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
     }
 }
 
-async fn fb161_download_event(writer: &mut BufWriter<File>) -> Result<u64> {
+#[warn(dead_code)]
+async fn test_fb161_download_event(writer: &mut BufWriter<File>) -> Result<u64> {
     let mut block_event: DownloadBlock = DownloadBlock {
         code: 0x00,
         name: *b"event-error-inform",
@@ -517,6 +535,129 @@ async fn fb161_download_event(writer: &mut BufWriter<File>) -> Result<u64> {
     }
 }
 
+async fn fb161_download_event(writer: &mut BufWriter<File>) -> Result<u64> {
+    let mut event_pos = 0;
+    let mut event_num = 0;
+    let mut block: DownloadBlockEvent = DownloadBlockEvent {
+        code: 0x00,
+        name: *b"event-error-inform",
+        len: 0x00,
+        num: 0x00,
+    };
+
+    if let Ok(prev_pos) = writer.seek(SeekFrom::Current(0)).await {
+        let data_ofs = prev_pos + mem::size_of::<DownloadBlockEvent>() as u64;
+        writer.seek(SeekFrom::Start(data_ofs)).await?;
+
+        if let Ok(mut conn) = fb161_sql_conn().await {
+            let mut s = sqlx::query!(r#"select fault_type, fault_start, fault_end from error"#)
+                .fetch(&mut conn);
+
+            let mut entry = DownloadEntryEvent {
+                etype: 0x00,
+                start_ts: *b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
+                end_ts: *b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
+            };
+            while let Ok(Some(row)) = s.try_next().await {
+                block.num += 1; /* error only */
+                entry.etype = (row.fault_type & 0x0000000F) as u8;
+                if let Some(timestamp) = row.fault_start {
+                    entry.start_ts[0] = bcd((timestamp.year() / 100) as u8);
+                    entry.start_ts[1] = bcd((timestamp.year() % 100) as u8);
+                    entry.start_ts[2] = bcd(timestamp.month() as u8);
+                    entry.start_ts[3] = bcd(timestamp.day() as u8);
+                    entry.start_ts[4] = bcd(timestamp.hour() as u8);
+                    entry.start_ts[5] = bcd(timestamp.minute() as u8);
+                    entry.start_ts[6] = bcd(timestamp.second() as u8);
+                }
+                if let Some(timestamp) = row.fault_end {
+                    entry.end_ts[0] = bcd((timestamp.year() / 100) as u8);
+                    entry.end_ts[1] = bcd((timestamp.year() % 100) as u8);
+                    entry.end_ts[2] = bcd(timestamp.month() as u8);
+                    entry.end_ts[3] = bcd(timestamp.day() as u8);
+                    entry.end_ts[4] = bcd(timestamp.hour() as u8);
+                    entry.end_ts[5] = bcd(timestamp.minute() as u8);
+                    entry.end_ts[6] = bcd(timestamp.second() as u8);
+                }
+                if let Ok(entry) = bincode::serialize(&entry) {
+                    let _ = writer.write_all(&entry).await?;
+                }
+            }
+
+            event_pos = writer.seek(SeekFrom::Current(0)).await.unwrap_or(0);
+            assert!(event_pos != 0);
+            if let Ok(mut sconn) = fb161_sql_conn().await {
+                let mut s = sqlx::query!(r#"select event_type, event_start, event_end from event"#)
+                    .fetch(&mut sconn);
+
+                let mut entry = DownloadEntryEvent {
+                    etype: 0x00,
+                    start_ts: *b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
+                    end_ts: *b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
+                };
+                writer.seek(SeekFrom::Current(1)).await?; /* for event record number */
+                while let Ok(Some(row)) = s.try_next().await {
+                    event_num += 1;
+                    entry.etype = (row.event_type & 0x0000000F) as u8;
+                    if let Some(timestamp) = row.event_start {
+                        entry.start_ts[0] = bcd((timestamp.year() / 100) as u8);
+                        entry.start_ts[1] = bcd((timestamp.year() % 100) as u8);
+                        entry.start_ts[2] = bcd(timestamp.month() as u8);
+                        entry.start_ts[3] = bcd(timestamp.day() as u8);
+                        entry.start_ts[4] = bcd(timestamp.hour() as u8);
+                        entry.start_ts[5] = bcd(timestamp.minute() as u8);
+                        entry.start_ts[6] = bcd(timestamp.second() as u8);
+                    }
+                    if let Some(timestamp) = row.event_end {
+                        entry.end_ts[0] = bcd((timestamp.year() / 100) as u8);
+                        entry.end_ts[1] = bcd((timestamp.year() % 100) as u8);
+                        entry.end_ts[2] = bcd(timestamp.month() as u8);
+                        entry.end_ts[3] = bcd(timestamp.day() as u8);
+                        entry.end_ts[4] = bcd(timestamp.hour() as u8);
+                        entry.end_ts[5] = bcd(timestamp.minute() as u8);
+                        entry.end_ts[6] = bcd(timestamp.second() as u8);
+                    }
+                    if let Ok(entry) = bincode::serialize(&entry) {
+                        let _ = writer.write_all(&entry).await?;
+
+                        /* TODO, similar cnt */
+                        let _ = writer.write_all(b"\x00").await?;
+                    }
+                }
+            }
+        }
+
+        if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
+            writer.seek(SeekFrom::Start(prev_pos)).await?;
+            block.len = (block.num as u32) * (mem::size_of::<DownloadEntryEvent>()) as u32;
+            block.len +=  1/*event-num*/ + (event_num as u32) * (mem::size_of::<DownloadEntryEvent>() + 1/*similar cnt*/) as u32;
+            let block= bincode::serialize(&block)?;
+            let wn = writer.write_all(&block).await;
+            assert!(wn.is_ok());
+
+            {
+                let _ = writer.seek(SeekFrom::Start(event_pos)).await;
+                //let _ = writer.write(event_num::<u8>.as_bytes()).await;
+
+                let mut buf = Vec::new();
+                WriteBytesExt::write_u8(&mut buf, event_num).unwrap();
+                let _ = writer.write_all(&Bytes::from(buf)).await;
+            }
+
+            let _ = writer.seek(SeekFrom::Start(curr_pos)).await;
+
+            //writer.flush().await.unwrap();
+            Ok(curr_pos - prev_pos)
+        }
+        else {
+            Err(anyhow!("current seek error"))
+        }
+    }
+    else {
+        Err(anyhow!("previous seek error"))
+    }
+}
+
 async fn fb161_sql_conn() -> sqlx::Result<PoolConnection<Sqlite>> {
     dotenv().ok();
 
@@ -530,8 +671,19 @@ async fn test_fb161_download() {
     if let Ok(file)  = File::create("/tmp/fb161_xxxxx_xxxxx.vdr").await {
         let mut writer = BufWriter::new(file);
 
+        {
+            //TODO
+            let mut block_num = Vec::new();
+            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 2).unwrap();
+            let _ = writer.write_all(&Bytes::from(block_num)).await;
+        }
         let _ = fb161_download_event(&mut writer).await;
         let _ = fb161_download_velocity(&mut writer).await;
+        {
+            //TODO
+            let block_checksum = b"\xFA";
+            let _ = writer.write_all(block_checksum).await;
+        }
         writer.flush().await.unwrap();
     }
     else {
