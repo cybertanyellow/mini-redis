@@ -540,7 +540,7 @@ async fn fb161_download_event(writer: &mut BufWriter<File>) -> Result<u64> {
     let mut event_num = 0;
     let mut block: DownloadBlockEvent = DownloadBlockEvent {
         code: 0x00,
-        name: *b"event-error-inform",
+        name: String::from("事件故障資料").as_bytes().try_into().unwrap(),
         len: 0x00,
         num: 0x00,
     };
@@ -689,4 +689,14 @@ async fn test_fb161_download() {
     else {
         assert!(false);
     }
+}
+#[tokio::test]
+async fn test_utf8() {
+    let name = String::from("事件及故障資料");
+    let array: [u8; 21] = name.as_bytes().try_into().expect("Event&ErrorInfo");
+    println!("[debug] {:?} {:?} {:?}", name, name.as_bytes(), array);
+    let name = String::from("事件及故障資");
+    let array: [u8; 18] = name.as_bytes().try_into().expect("Event&ErrorInfo");
+    println!("[debug] {:?} {:?} {:?}", name, name.as_bytes(), array);
+    assert_eq!(&array[..], name.as_bytes());
 }
