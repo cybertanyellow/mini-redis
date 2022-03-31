@@ -398,6 +398,23 @@ struct DownloadEntryLocationHour {
     hour: [DownloadEntryLocationPer; 60],
 }
 
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockGeneric {
+    code: u8,
+    name: [u8; 18],
+    len: u32,
+    num: u16,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadEntryDriver {
+    account: [u8; 18],
+    action: u8,
+    dtime: [u8; 7],
+}
+
 async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
     let mut block: DownloadBlockVelocity = DownloadBlockVelocity {
         code: 0x01,
@@ -725,7 +742,7 @@ async fn fb161_download_location(writer: &mut BufWriter<File>) -> Result<u64> {
         let mut s = sqlx::query!(r#"SELECT timestamp, AVG(logitude) AS logi, AVG(latitude) AS lati, AVG(altitude) AS alti, AVG(speed) AS spd FROM location GROUP BY timestamp"#)
             .fetch(&mut conn);
         while let Ok(Some(row)) = s.try_next().await {
-            println!("[debug][location] {:?}", row);
+            debug!("[debug][location] {:?}", row);
 
             match (row.timestamp, row.logi, row.lati, row.alti, row.spd) {
                 (Some(ts), Some(logi), Some(lati), Some(alti), Some(spd)) => {
@@ -782,6 +799,79 @@ async fn fb161_download_location(writer: &mut BufWriter<File>) -> Result<u64> {
     if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
         writer.seek(SeekFrom::Start(prev_pos)).await?;
         block.len = (block.num as u32) * (mem::size_of::<DownloadEntryLocationHour>()) as u32;
+        let block= bincode::serialize(&block)?;
+        let wn = writer.write_all(&block).await;
+        assert!(wn.is_ok());
+
+        let _ = writer.seek(SeekFrom::Start(curr_pos)).await;
+
+        Ok(curr_pos - prev_pos)
+    }
+    else {
+        Err(anyhow!("current seek error"))
+    }
+}
+
+async fn fb161_download_driver(writer: &mut BufWriter<File>) -> Result<u64> {
+    let mut block: DownloadBlockLocation = DownloadBlockLocation {
+        code: 0x03,
+        name: String::from("駕駛活動類型").as_bytes().try_into().unwrap(),
+        len: 0x00,
+        num: 0x00,
+    };
+
+    let prev_pos = match writer.seek(SeekFrom::Current(0)).await {
+        Ok(pos) => {
+            let data_ofs = pos + mem::size_of::<DownloadBlockGeneric>() as u64;
+            writer.seek(SeekFrom::Start(data_ofs)).await?;
+            pos
+        },
+        Err(e) => {
+            return Err(anyhow!("previous seek error: {}", e));
+        }
+    };
+
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        let mut entry: DownloadEntryDriver = DownloadEntryDriver {
+            account: [0; 18],
+            action: 0,
+            dtime: [0; 7],
+        };
+
+        let mut s = sqlx::query!(r#"SELECT account, action, timestamp FROM driver"#)
+            .fetch(&mut conn);
+        while let Ok(Some(row)) = s.try_next().await {
+            debug!("[debug][driver] {:?}", row);
+
+            if let Some(ts) = row.timestamp {
+                entry.dtime[0] = bcd((ts.year() / 100) as u8);
+                entry.dtime[1] = bcd((ts.year() % 100) as u8);
+                entry.dtime[2] = bcd(ts.month() as u8);
+                entry.dtime[3] = bcd(ts.day() as u8);
+                entry.dtime[4] = bcd(ts.hour() as u8);
+                entry.dtime[5] = bcd(ts.minute() as u8);
+                entry.dtime[6] = bcd(ts.second() as u8);
+
+                let (n, m) = (entry.account.len(), row.account.as_bytes().len());
+                if n > m {
+                    entry.account[..m].copy_from_slice(row.account.as_bytes());
+                }
+                else {
+                    entry.account[..n].copy_from_slice(&row.account.as_bytes()[..n]);
+                }
+
+                entry.action = row.action as u8;
+                if let Ok(entry) = bincode::serialize(&entry) {
+                    let _ = writer.write_all(&entry).await?;
+                }
+                block.num += 1;
+            }
+        }
+    }
+
+    if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
+        writer.seek(SeekFrom::Start(prev_pos)).await?;
+        block.len = (block.num as u32) * (mem::size_of::<DownloadEntryDriver>()) as u32;
         let block= bincode::serialize(&block)?;
         let wn = writer.write_all(&block).await;
         assert!(wn.is_ok());
@@ -876,6 +966,30 @@ async fn test_fb161_download_velocity() {
             let _ = writer.write_all(&Bytes::from(block_num)).await;
         }
         let _ = fb161_download_velocity(&mut writer).await;
+        {
+            //TODO
+            let block_checksum = b"\xFA";
+            let _ = writer.write_all(block_checksum).await;
+        }
+        writer.flush().await.unwrap();
+    }
+    else {
+        assert!(false);
+    }
+}
+
+#[tokio::test]
+async fn test_fb161_download_driver() {
+    if let Ok(file)  = File::create("/tmp/fb161_driver.vdr").await {
+        let mut writer = BufWriter::new(file);
+
+        {
+            //TODO
+            let mut block_num = Vec::new();
+            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 1).unwrap();
+            let _ = writer.write_all(&Bytes::from(block_num)).await;
+        }
+        let _ = fb161_download_driver(&mut writer).await;
         {
             //TODO
             let block_checksum = b"\xFA";
