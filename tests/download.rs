@@ -378,9 +378,10 @@ async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
     let mut block: DownloadBlockVelocity = DownloadBlockVelocity {
         code: 0x01,
         name: *b"velocity-informati",
-        len: 0x11,
-        num: 0x01,
+        len: 0x00000000,
+        num: 0x0000,
     };
+    //let mut force_cnt = 10;
 
     if let Ok(prev_pos) = writer.seek(SeekFrom::Current(0)).await {
         let data_ofs = prev_pos + mem::size_of::<DownloadBlockVelocity>() as u64;
@@ -397,6 +398,11 @@ async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
                 speed: [0; 120],
             };
             while let Ok(Some(row)) = s.try_next().await {
+                /*force_cnt -= 1;
+                if force_cnt == 0 {
+                    break;
+                }*/
+
                 let SqlVelocity {
                     speed,
                     timestamp,
@@ -471,7 +477,7 @@ async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
 
         if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
             writer.seek(SeekFrom::Start(prev_pos)).await?;
-            block.len = (block.num as u32) * (mem::size_of::<DownloadEntryVelocity>()) as u32;
+            block.len = 2/*block.num*/ + (block.num as u32) * (mem::size_of::<DownloadEntryVelocity>()) as u32;
             let block= bincode::serialize(&block)?;
             let wn = writer.write_all(&block).await;
             assert!(wn.is_ok());
