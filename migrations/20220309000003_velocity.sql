@@ -17,7 +17,9 @@ CREATE TABLE location (
     logitude REAL NOT NULL,
     latitude REAL NOT NULL,
     altitude REAL NOT NULL, --TODO, f64?
-    speed_avg Float NOT NULL,
+    speed Float NOT NULL,
 
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP --reserved
+    -- SELECT timestamp, AVG(logitude) AS logitude, AVG(latitude) AS latitude, AVG(altitude) AS
+    -- altitude, AVG(speed) AS speed FROM location GROUP BY timestamp;
+    timestamp TIMESTAMP DATETIME DEFAULT(STRFTIME('%Y-%m-%d %H:%M', 'NOW'))
 );

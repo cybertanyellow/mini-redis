@@ -118,7 +118,7 @@ struct CacheLocation {
     logitude: f64,
     latitude: f64,
     altitude: f64,
-    speed_avg: f32,
+    speed: f32,
 }
 
 impl FbSql {
@@ -181,13 +181,13 @@ impl FbSql {
             logitude: 0.0,
             latitude: 0.0,
             altitude: 0.0,
-            speed_avg: 0.0,
+            speed: 0.0,
         };
         if let Ok(json) = serde_json::from_slice(&value) {
             location = json;
         }
-        match sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed_avg) VALUES (?1, ?2, ?3, ?4)"#,
-        location.logitude, location.latitude, location.altitude, location.speed_avg).execute(&mut self.conn).await {
+        match sqlx::query!(r#"INSERT INTO location (logitude, latitude, altitude, speed) VALUES (?1, ?2, ?3, ?4)"#,
+        location.logitude, location.latitude, location.altitude, location.speed).execute(&mut self.conn).await {
             Ok(r) => {
                 self.location_id = Some(r.last_insert_rowid());
                 info!("INSERT location with {:?} OK {:?}", location, self.location_id);
@@ -664,6 +664,7 @@ impl FbSql {
 
     async fn update_velocity(&mut self, value: &Bytes) -> Result<i64, sqlx::Error> {
         if let Ok(velocity) = serde_json::from_slice::<CacheVelocity>(value) {
+
             match (velocity.odo, velocity.timestamp) {
                 (Some(_odo), Some(_timestamp)) => {
                     self.odo = velocity.odo;

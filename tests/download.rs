@@ -373,6 +373,30 @@ struct DownloadEntryEvent {
     //related: u8,
 }
 
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockLocation {
+    code: u8,
+    name: [u8; 18],
+    len: u32,
+    num: u16,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadEntryLocationPer {
+    logitude: f32,
+    latitude: f32,
+    altitude: u16, /* TODO */
+    speed: u8,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+struct DownloadEntryLocationHour {
+    start: [u8; 7],
+    #[serde(with = "BigArray")]
+    hour: [DownloadEntryLocationPer; 60],
+}
 
 async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
     let mut block: DownloadBlockVelocity = DownloadBlockVelocity {
@@ -667,6 +691,111 @@ async fn fb161_download_event(writer: &mut BufWriter<File>) -> Result<u64> {
     }
 }
 
+async fn fb161_download_location(writer: &mut BufWriter<File>) -> Result<u64> {
+    let mut block: DownloadBlockLocation = DownloadBlockLocation {
+        code: 0x04,
+        name: String::from("定位資料點點").as_bytes().try_into().unwrap(),
+        len: 0x00,
+        num: 0x00,
+    };
+
+    let prev_pos = match writer.seek(SeekFrom::Current(0)).await {
+        Ok(pos) => {
+            let data_ofs = pos + mem::size_of::<DownloadBlockLocation>() as u64;
+            writer.seek(SeekFrom::Start(data_ofs)).await?;
+            pos
+        },
+        Err(e) => {
+            return Err(anyhow!("previous seek error: {}", e));
+        }
+    };
+
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        let mut entry: DownloadEntryLocationHour = DownloadEntryLocationHour {
+            start: *b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
+            hour: [ DownloadEntryLocationPer {
+                logitude: 0.0,
+                latitude: 0.0,
+                altitude: 0x00,
+                speed: 0,
+            }; 60],
+        };
+        let mut minutes = 0;
+
+        let mut s = sqlx::query!(r#"SELECT timestamp, AVG(logitude) AS logi, AVG(latitude) AS lati, AVG(altitude) AS alti, AVG(speed) AS spd FROM location GROUP BY timestamp"#)
+            .fetch(&mut conn);
+        while let Ok(Some(row)) = s.try_next().await {
+            println!("[debug][location] {:?}", row);
+
+            match (row.timestamp, row.logi, row.lati, row.alti, row.spd) {
+                (Some(ts), Some(logi), Some(lati), Some(alti), Some(spd)) => {
+                    if minutes == 0 {
+                        let ts = NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M").unwrap();
+                        entry.start[0] = bcd((ts.year() / 100) as u8);
+                        entry.start[1] = bcd((ts.year() % 100) as u8);
+                        entry.start[2] = bcd(ts.month() as u8);
+                        entry.start[3] = bcd(ts.day() as u8);
+                        entry.start[4] = bcd(ts.hour() as u8);
+                        entry.start[5] = bcd(ts.minute() as u8);
+                        entry.start[6] = bcd(ts.second() as u8);
+                    }
+
+                    /* TODO convert to meter from degree */
+                    entry.hour[minutes].logitude = logi as f32 * 111.12;
+                    entry.hour[minutes].latitude = lati as f32 * 111.12;
+                    entry.hour[minutes].altitude = (alti as f32 * 0.01) as u16;
+                    entry.hour[minutes].speed = spd as u8;
+
+                    minutes += 1;
+
+                    if minutes == 60 {
+                        if let Ok(entry) = bincode::serialize(&entry) {
+                            let _ = writer.write_all(&entry).await?;
+                        }
+                        block.num += 1;
+
+                        entry = DownloadEntryLocationHour {
+                            start: *b"\xFF\xFF\xFF\xFF\xFF\xFF\xFF",
+                            hour: [ DownloadEntryLocationPer {
+                                logitude: 0.0,
+                                latitude: 0.0,
+                                altitude: 0x00,
+                                speed: 0,
+                            }; 60],
+                        };
+                        minutes = 0;
+                    }
+                },
+                _ => {
+                    continue;
+                }
+            }
+        }
+        if minutes != 0 {
+            if let Ok(entry) = bincode::serialize(&entry) {
+                let _ = writer.write_all(&entry).await?;
+            }
+            block.num += 1;
+        }
+    }
+
+    if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
+        writer.seek(SeekFrom::Start(prev_pos)).await?;
+        block.len = (block.num as u32) * (mem::size_of::<DownloadEntryLocationHour>()) as u32;
+        let block= bincode::serialize(&block)?;
+        let wn = writer.write_all(&block).await;
+        assert!(wn.is_ok());
+
+        let _ = writer.seek(SeekFrom::Start(curr_pos)).await;
+
+        Ok(curr_pos - prev_pos)
+    }
+    else {
+        Err(anyhow!("current seek error"))
+    }
+}
+
+
 async fn fb161_sql_conn() -> sqlx::Result<PoolConnection<Sqlite>> {
     dotenv().ok();
 
@@ -677,17 +806,18 @@ async fn fb161_sql_conn() -> sqlx::Result<PoolConnection<Sqlite>> {
 
 #[tokio::test]
 async fn test_fb161_download() {
-    if let Ok(file)  = File::create("/tmp/fb161_xxxxx_xxxxx.vdr").await {
+    if let Ok(file)  = File::create("/tmp/fb161.vdr").await {
         let mut writer = BufWriter::new(file);
 
         {
             //TODO
             let mut block_num = Vec::new();
-            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 2).unwrap();
+            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 3).unwrap();
             let _ = writer.write_all(&Bytes::from(block_num)).await;
         }
         let _ = fb161_download_event(&mut writer).await;
         let _ = fb161_download_velocity(&mut writer).await;
+        let _ = fb161_download_location(&mut writer).await;
         {
             //TODO
             let block_checksum = b"\xFA";
@@ -708,4 +838,52 @@ async fn test_utf8() {
     let array: [u8; 18] = name.as_bytes().try_into().expect("Event&ErrorInfo");
     println!("[debug] {:?} {:?} {:?}", name, name.as_bytes(), array);
     assert_eq!(&array[..], name.as_bytes());
+}
+
+#[tokio::test]
+async fn test_fb161_download_location() {
+    if let Ok(file)  = File::create("/tmp/fb161_location.vdr").await {
+        let mut writer = BufWriter::new(file);
+
+        {
+            //TODO
+            let mut block_num = Vec::new();
+            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 1).unwrap();
+            let _ = writer.write_all(&Bytes::from(block_num)).await;
+        }
+        let _ = fb161_download_location(&mut writer).await;
+        {
+            //TODO
+            let block_checksum = b"\xFA";
+            let _ = writer.write_all(block_checksum).await;
+        }
+        writer.flush().await.unwrap();
+    }
+    else {
+        assert!(false);
+    }
+}
+
+#[tokio::test]
+async fn test_fb161_download_velocity() {
+    if let Ok(file)  = File::create("/tmp/fb161_velocity.vdr").await {
+        let mut writer = BufWriter::new(file);
+
+        {
+            //TODO
+            let mut block_num = Vec::new();
+            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 1).unwrap();
+            let _ = writer.write_all(&Bytes::from(block_num)).await;
+        }
+        let _ = fb161_download_velocity(&mut writer).await;
+        {
+            //TODO
+            let block_checksum = b"\xFA";
+            let _ = writer.write_all(block_checksum).await;
+        }
+        writer.flush().await.unwrap();
+    }
+    else {
+        assert!(false);
+    }
 }

@@ -199,21 +199,21 @@ async fn fb161_fb161_location_task(db: Db, s: Fb161) {
     let mut logitude = 0.0;
     let mut latitude = 0.0;
     let mut altitude = 0.0;
-    let mut speed_avg = 0.0;
+    let mut speed = 0.0;
 
     let mut interval_1s = time::interval(time::Duration::from_millis(1000));
     /*TODO graceful shutdown?? */
     loop {
         tokio::select! {
             _ = interval_1s.tick() => {
-                let cmd = format!(r#"{{"logitude":{},"latitude":{},"altitude":{},"speed_avg":{}}}"#,
-                                     logitude, latitude, altitude, speed_avg);
+                let cmd = format!(r#"{{"logitude":{},"latitude":{},"altitude":{},"speed":{}}}"#,
+                                     logitude, latitude, altitude, speed);
                 db.set(s.key.clone(), cmd.clone().into(), None);
                 db.publish(&s.key, cmd.into());
                 logitude += 11.1;
                 latitude += 22.2;
                 altitude += 33.3;
-                speed_avg += 11.1;
+                speed += 11.1;
             }
         }
     }

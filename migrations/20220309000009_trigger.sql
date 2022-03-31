@@ -51,10 +51,10 @@ END;
 
 -- remove older than one year location's rows
 -- test
---      INSERT INTO location (logitude, latitude, altitude, timestamp, speed_avg) VALUES (33.3, 44.4, 55.5, strftime("%Y-%m-%d %H:%M:%f", "now", "-2 minute"), 66.66);
---      INSERT INTO location (logitude, latitude, altitude, timestamp, speed_avg) VALUES (33.4, 44.4, 55.6, strftime("%Y-%m-%d %H:%M:%f", "now", "-1 minute"), 10.1);
---      INSERT INTO location (logitude, latitude, altitude, timestamp, speed_avg) VALUES (33.5, 44.4, 55.7, CURRENT_TIMESTAMP, 5.0);
---      INSERT INTO location (logitude, latitude, altitude, timestamp, speed_avg) VALUES (33.4, 44.4, 55.6, strftime("%Y-%m-%d %H:%M:%f", "now", "-1 year", "-1 month"), 10.1);
+--      INSERT INTO location (logitude, latitude, altitude, timestamp, speed) VALUES (33.3, 44.4, 55.5, strftime("%Y-%m-%d %H:%M:%f", "now", "-2 minute"), 66.66);
+--      INSERT INTO location (logitude, latitude, altitude, timestamp, speed) VALUES (33.4, 44.4, 55.6, strftime("%Y-%m-%d %H:%M:%f", "now", "-1 minute"), 10.1);
+--      INSERT INTO location (logitude, latitude, altitude, timestamp, speed) VALUES (33.5, 44.4, 55.7, CURRENT_TIMESTAMP, 5.0);
+--      INSERT INTO location (logitude, latitude, altitude, timestamp, speed) VALUES (33.4, 44.4, 55.6, strftime("%Y-%m-%d %H:%M:%f", "now", "-1 year", "-1 month"), 10.1);
 CREATE TRIGGER location_rows_limit_day365 AFTER INSERT ON location
     WHEN (SELECT COUNT(*) FROM location WHERE date(timestamp) < date('now', '-1 year')) > 0
     BEGIN

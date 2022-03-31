@@ -558,7 +558,7 @@ async fn fb161_db_task(db: Db, mut request: mpsc::Receiver<(String, String, Byte
     let mut logitude = 0.0;
     let mut latitude = 0.0;
     let mut altitude = 0.0;
-    let mut speed_avg = 0.0;
+    let mut loc_speed = 0.0;
 
     //TODO If the shutdown flag is set, then the task should exit.
     loop {
@@ -567,7 +567,7 @@ async fn fb161_db_task(db: Db, mut request: mpsc::Receiver<(String, String, Byte
                 db_velocity_task_unit(&db, &mut speed, &mut odo);
             }
             _ = interval_location.tick() => {
-                db_location_task_unit(&db, &mut logitude, &mut latitude, &mut altitude, &mut speed_avg);
+                db_location_task_unit(&db, &mut logitude, &mut latitude, &mut altitude, &mut loc_speed);
             }
             Some((cmd, key, val)) = request.recv() => {
                 match cmd.as_str() {
@@ -595,6 +595,7 @@ async fn fb161_db_task(db: Db, mut request: mpsc::Receiver<(String, String, Byte
 }
 
 fn db_velocity_task_unit(db: &Db, speed: &mut f64, odo: &mut f64) {
+    //debug!("vlocity => current_timestamp-{:?}", chrono::offset::Utc::now());
     let cmd = format!(r#"{{"speed":{},"odo":{}}}"#, speed, odo);
     *odo += *speed / 36000.0;
 
@@ -605,12 +606,13 @@ fn db_velocity_task_unit(db: &Db, speed: &mut f64, odo: &mut f64) {
     }
 }
 
-fn db_location_task_unit(db: &Db, logitude: &mut f64, latitude: &mut f64, altitude: &mut f64, speed_avg: &mut f64) {
-    let cmd = format!(r#"{{"logitude":{},"latitude":{},"altitude":{},"speed_avg":{}}}"#,
-                      logitude, latitude, altitude, speed_avg);
+fn db_location_task_unit(db: &Db, logitude: &mut f64, latitude: &mut f64, altitude: &mut f64, speed: &mut f64) {
+    //debug!("location => current_timestamp-{:?}", chrono::offset::Utc::now());
+    let cmd = format!(r#"{{"logitude":{},"latitude":{},"altitude":{},"speed":{}}}"#,
+                      logitude, latitude, altitude, speed);
     db.set("fb161/location".into(), cmd.into(), None);
     *logitude += 11.1;
     *latitude += 22.2;
     *altitude += 33.3;
-    *speed_avg += 11.1;
+    *speed += 11.1;
 }
