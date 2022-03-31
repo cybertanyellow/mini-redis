@@ -1010,13 +1010,13 @@ async fn fb161_download_vu(writer: &mut BufWriter<File>) -> Result<u64> {
         }
     }
     let _ = writer.write(&td_num.to_le_bytes()).await?;
-    println!("[debug][time-date] num-{:?}", td_num);
+    debug!("[debug][time-date] num-{:?}", td_num);
 
     if let Ok(mut conn) = fb161_sql_conn().await {
         let mut s = sqlx::query!(r#"SELECT timestamp_before AS "timestamp_before: NaiveDateTime", timestamp_after AS "timestamp_after: NaiveDateTime" FROM time_date"#)
             .fetch(&mut conn);
         while let Ok(Some(row)) = s.try_next().await {
-            println!("[debug][time-date] {:?}", row);
+            debug!("[debug][time-date] {:?}", row);
 
             let mut entry = DownloadBlockTimeDate {
                 timestamp_before: [0; 7],
@@ -1194,33 +1194,69 @@ async fn fb161_sql_conn() -> sqlx::Result<PoolConnection<Sqlite>> {
     pool.acquire().await
 }
 
-#[tokio::test]
-async fn test_fb161_download() {
-    if let Ok(file)  = File::create("/tmp/fb161.vdr").await {
+async fn fb161_download(file: &str) -> Result<()> {
+    if let Ok(file)  = File::create(file).await {
         let mut writer = BufWriter::new(file);
 
-        {
-            //TODO
-            let mut block_num = Vec::new();
-            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 5).unwrap();
-            let _ = writer.write_all(&Bytes::from(block_num)).await;
-        }
+        // block number
+        writer.write(&5_u16.to_le_bytes()).await?;
         let _ = fb161_download_event(&mut writer).await;
         let _ = fb161_download_velocity(&mut writer).await;
         let _ = fb161_download_vu(&mut writer).await;
         let _ = fb161_download_driver(&mut writer).await;
         let _ = fb161_download_location(&mut writer).await;
-        {
-            //TODO
-            let block_checksum = b"\xFA";
-            let _ = writer.write_all(block_checksum).await;
-        }
+        
+        //TODO robust
+        let block_checksum = b"\xFA";
+        let _ = writer.write_all(block_checksum).await;
+
         writer.flush().await.unwrap();
+        Ok(())
     }
     else {
-        panic!("fb161_download");
+        Err(anyhow!("file create error"))
     }
 }
+
+async fn fb161_download_name() -> Result<String> {
+    let mut conn = fb161_sql_conn().await?;
+    let s = sqlx::query!(r#"select timestamp as "timestamp: NaiveDateTime" from velocity"#).fetch_one(&mut conn).await?;
+    let ts = s.timestamp;
+
+    let s = sqlx::query!(r#"SELECT car_number FROM vehicle_unit"#).fetch_one(&mut conn).await?;
+    let car_number = s.car_number;
+
+    match (ts, car_number) {
+        (Some(ts), Some(car)) => {
+            Ok(format!("D{}_{}.vdr", ts.format("%Y%m%d_%H%M%S"), car))
+        },
+        (Some(ts), None) => {
+            Ok(format!("D{}_XXXXXXXX.vdr", ts.format("%Y%m%d_%H%M%S")))
+        },
+        (None, Some(car)) => {
+            Ok(format!("DXXXXXXXX_XXXXXX_{}.vdr", car))
+        },
+        (None, None) => {
+            Ok("DXXXXXXXX_XXXXXX_XXXXXXX.vdr".to_string())
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_fb161_download() {
+    let f = fb161_download_name().await;
+
+    assert!(f.is_ok());
+    let f = f.unwrap();
+
+    match fb161_download(&f).await {
+        Ok(_) => {},
+        Err(e) => {
+            panic!("{}", e);
+        }
+    }
+}
+
 #[tokio::test]
 async fn test_utf8() {
     let name = String::from("事件及故障資料");
