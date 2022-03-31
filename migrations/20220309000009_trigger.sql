@@ -92,8 +92,8 @@ END;
 -- autocomplete travel/rest-threshold
 -- last_insert_rowid()
 -- test: 
---      INSERT INTO travel_threshold (timestamp_before, threshold_after) VALUES (date('now', '-1 month'), 5.00);
---      INSERT INTO rest_threshold (timestamp_before, threshold_after) VALUES (date('now', '-1 month'), 0.45);
+--      INSERT INTO travel_threshold (timestamp_before, threshold_after) VALUES (datetime('now', '-1 month'), 5.00);
+--      INSERT INTO rest_threshold (timestamp_before, threshold_after) VALUES (datetime('now', '-1 month'), 0.45);
 --      INSERT INTO driver (account, action) VALUES ('aaaa', 1);
 --      INSERT INTO driver (account, action) VALUES ('dddd', 3);
 --      INSERT INTO driver (account, action) VALUES ('ccc', 2);
@@ -201,7 +201,7 @@ END;
 
 -- rule: limit last 5 row in threshold/time_date
 -- test: 
---      INSERT INTO travel_threshold (timestamp_before, threshold_after) VALUES (date('now', '-1 month'), 5.00);
+--      INSERT INTO travel_threshold (timestamp_before, threshold_after) VALUES (datetime('now', '-1 month'), 5.00);
 --      (x 6)
 CREATE TRIGGER travel_threshold_limit_rows5 AFTER INSERT ON travel_threshold
     WHEN (SELECT COUNT(*) FROM travel_threshold) > 5

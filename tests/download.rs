@@ -415,6 +415,62 @@ struct DownloadEntryDriver {
     dtime: [u8; 7],
 }
 
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockTechnology {
+    code: u8,
+    name: [u8; 18],
+    len: u32,
+
+    /* vu */
+    #[serde(with = "BigArray")]
+    manufacture_name: [u8; 36],
+    #[serde(with = "BigArray")]
+    manufacture_address: [u8; 36],
+    serial_number: [u8; 8],
+    sw_version: [u8; 4],
+    install_timestamp: [u8; 7],
+    manufacture_date: [u8; 4],
+    certification_number: [u8; 8],
+    car_number: [u8; 17],
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockCalibration {
+    #[serde(with = "BigArray")]
+    user: [u8; 36],
+    odo_before: [u8; 4], // TODO
+    odo_after: [u8; 4], // TODO
+    timestamp_before: [u8; 7],
+    timestamp_after: [u8; 7],
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockTimeDate {
+    timestamp_before: [u8; 7],
+    timestamp_after: [u8; 7],
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockTravelThreshold {
+    timestamp_before: [u8; 7],
+    timestamp_after: [u8; 7],
+    threshold_before: [u8; 2], // BCD
+    threshold_after: [u8; 2], // BCD
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Serialize, Deserialize)]
+#[repr(packed(1))]
+struct DownloadBlockRestThreshold {
+    timestamp_before: [u8; 7],
+    timestamp_after: [u8; 7],
+    threshold_before: [u8; 2], // BCD
+    threshold_after: [u8; 2], // BCD
+}
+
 async fn fb161_download_velocity(writer: &mut BufWriter<File>) -> Result<u64> {
     let mut block: DownloadBlockVelocity = DownloadBlockVelocity {
         code: 0x01,
@@ -748,13 +804,7 @@ async fn fb161_download_location(writer: &mut BufWriter<File>) -> Result<u64> {
                 (Some(ts), Some(logi), Some(lati), Some(alti), Some(spd)) => {
                     if minutes == 0 {
                         let ts = NaiveDateTime::parse_from_str(&ts, "%Y-%m-%d %H:%M").unwrap();
-                        entry.start[0] = bcd((ts.year() / 100) as u8);
-                        entry.start[1] = bcd((ts.year() % 100) as u8);
-                        entry.start[2] = bcd(ts.month() as u8);
-                        entry.start[3] = bcd(ts.day() as u8);
-                        entry.start[4] = bcd(ts.hour() as u8);
-                        entry.start[5] = bcd(ts.minute() as u8);
-                        entry.start[6] = bcd(ts.second() as u8);
+                        bcd_timestamp(&mut entry.start, ts)?;
                     }
 
                     /* TODO convert to meter from degree */
@@ -844,21 +894,9 @@ async fn fb161_download_driver(writer: &mut BufWriter<File>) -> Result<u64> {
             debug!("[debug][driver] {:?}", row);
 
             if let Some(ts) = row.timestamp {
-                entry.dtime[0] = bcd((ts.year() / 100) as u8);
-                entry.dtime[1] = bcd((ts.year() % 100) as u8);
-                entry.dtime[2] = bcd(ts.month() as u8);
-                entry.dtime[3] = bcd(ts.day() as u8);
-                entry.dtime[4] = bcd(ts.hour() as u8);
-                entry.dtime[5] = bcd(ts.minute() as u8);
-                entry.dtime[6] = bcd(ts.second() as u8);
+                bcd_timestamp(&mut entry.dtime, ts)?;
 
-                let (n, m) = (entry.account.len(), row.account.as_bytes().len());
-                if n > m {
-                    entry.account[..m].copy_from_slice(row.account.as_bytes());
-                }
-                else {
-                    entry.account[..n].copy_from_slice(&row.account.as_bytes()[..n]);
-                }
+                copy_slice(&mut entry.account, row.account.as_bytes());
 
                 entry.action = row.action as u8;
                 if let Ok(entry) = bincode::serialize(&entry) {
@@ -872,6 +910,268 @@ async fn fb161_download_driver(writer: &mut BufWriter<File>) -> Result<u64> {
     if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
         writer.seek(SeekFrom::Start(prev_pos)).await?;
         block.len = (block.num as u32) * (mem::size_of::<DownloadEntryDriver>()) as u32;
+        let block= bincode::serialize(&block)?;
+        let wn = writer.write_all(&block).await;
+        assert!(wn.is_ok());
+
+        let _ = writer.seek(SeekFrom::Start(curr_pos)).await;
+
+        Ok(curr_pos - prev_pos)
+    }
+    else {
+        Err(anyhow!("current seek error"))
+    }
+}
+
+async fn fb161_download_vu(writer: &mut BufWriter<File>) -> Result<u64> {
+    let prev_pos = match writer.seek(SeekFrom::Current(0)).await {
+        Ok(pos) => {
+            let data_ofs = pos + mem::size_of::<DownloadBlockTechnology>() as u64;
+            writer.seek(SeekFrom::Start(data_ofs)).await?;
+            pos
+        },
+        Err(e) => {
+            return Err(anyhow!("previous seek error: {}", e));
+        }
+    };
+
+    let mut calibration_num: u16 = 0;
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        if let Ok(row) = sqlx::query!(r#"SELECT COUNT(*) as cnt FROM calibration"#).fetch_one(&mut conn).await {
+            calibration_num = row.cnt as u16;
+        }
+    }
+    let _ = writer.write(&calibration_num.to_le_bytes()).await?;
+
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        let mut s = sqlx::query!(r#"SELECT user, odo_before, odo_after, timestamp_before, timestamp_after FROM calibration"#)
+            .fetch(&mut conn);
+        while let Ok(Some(row)) = s.try_next().await {
+            debug!("[debug][calibration] {:?}", row);
+
+            let mut entry = DownloadBlockCalibration {
+                user: [0; 36],
+                odo_before: [0; 4], // TODO
+                odo_after: [0; 4], // TODO
+                timestamp_before: [0; 7],
+                timestamp_after: [0; 7],
+            };
+
+            if let Some(ts) = row.timestamp_before {
+                bcd_timestamp(&mut entry.timestamp_before, ts)?;
+            }
+            if let Some(ts) = row.timestamp_after {
+                bcd_timestamp(&mut entry.timestamp_after, ts)?;
+            }
+
+            if let Some(odo) = row.odo_before {
+                let mut odo = (odo / 0.1) as u32;
+                entry.odo_before[0] = bcd((odo / 1_000_000) as u8);
+                odo %= 1_000_000;
+                entry.odo_before[1] = bcd((odo / 10000) as u8);
+                odo %= 10000;
+                entry.odo_before[2] = bcd((odo / 100) as u8);
+                odo %= 100;
+                entry.odo_before[3] = bcd(odo as u8);
+            }
+
+            let odo = row.odo_after;
+            let mut odo = (odo / 0.1) as u32;
+            entry.odo_after[0] = bcd((odo / 1_000_000) as u8);
+            odo %= 1_000_000;
+            entry.odo_after[1] = bcd((odo / 10000) as u8);
+            odo %= 10000;
+            entry.odo_after[2] = bcd((odo / 100) as u8);
+            odo %= 100;
+            entry.odo_after[3] = bcd(odo as u8);
+
+            /*let (n, m) = (entry.user.len(), row.user.as_bytes().len());
+            if n > m {
+                entry.user[..m].copy_from_slice(row.user.as_bytes());
+            }
+            else {
+                entry.user[..n].copy_from_slice(&row.user.as_bytes()[..n]);
+            }*/
+            copy_slice(&mut entry.user, row.user.as_bytes());
+
+            if let Ok(entry) = bincode::serialize(&entry) {
+                let _ = writer.write_all(&entry).await?;
+            }
+        }
+    }
+    else {
+        panic!("sql connection error");
+    }
+
+    let mut td_num: u16 = 0;
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        if let Ok(row) = sqlx::query!(r#"SELECT COUNT(*) as cnt FROM time_date"#).fetch_one(&mut conn).await {
+            td_num = row.cnt as u16;
+        }
+    }
+    let _ = writer.write(&td_num.to_le_bytes()).await?;
+    println!("[debug][time-date] num-{:?}", td_num);
+
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        let mut s = sqlx::query!(r#"SELECT timestamp_before AS "timestamp_before: NaiveDateTime", timestamp_after AS "timestamp_after: NaiveDateTime" FROM time_date"#)
+            .fetch(&mut conn);
+        while let Ok(Some(row)) = s.try_next().await {
+            println!("[debug][time-date] {:?}", row);
+
+            let mut entry = DownloadBlockTimeDate {
+                timestamp_before: [0; 7],
+                timestamp_after: [0; 7],
+            };
+
+            if let Some(ts) = row.timestamp_before {
+                bcd_timestamp(&mut entry.timestamp_before, ts)?;
+            }
+            if let Some(ts) = row.timestamp_after {
+                bcd_timestamp(&mut entry.timestamp_after, ts)?;
+            }
+            if let Ok(entry) = bincode::serialize(&entry) {
+                let _ = writer.write_all(&entry).await?;
+            }
+        }
+    }
+    else {
+        panic!("sql connection error");
+    }
+
+    let mut travel_num: u16 = 0;
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        if let Ok(row) = sqlx::query!(r#"SELECT COUNT(*) as cnt FROM travel_threshold"#).fetch_one(&mut conn).await {
+            travel_num = row.cnt as u16;
+        }
+    }
+    let _ = writer.write(&travel_num.to_le_bytes()).await?;
+
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        let mut s = sqlx::query!(r#"SELECT timestamp_before, timestamp_after, threshold_before, threshold_after FROM travel_threshold"#)
+            .fetch(&mut conn);
+        while let Ok(Some(row)) = s.try_next().await {
+            debug!("[debug][travel-threshold] {:?}", row);
+
+            let mut entry = DownloadBlockTravelThreshold {
+                timestamp_before: [0; 7],
+                timestamp_after: [0; 7],
+                threshold_before: [0; 2],
+                threshold_after: [0; 2],
+            };
+
+            if let Some(ts) = row.timestamp_before {
+                bcd_timestamp(&mut entry.timestamp_before, ts)?;
+            }
+            if let Some(ts) = row.timestamp_after {
+                bcd_timestamp(&mut entry.timestamp_after, ts)?;
+            }
+            if let Some(mut thd) = row.threshold_before {
+                entry.threshold_before[0] = bcd(thd.trunc() as u8);
+                thd = thd.fract() * 100.0;
+                entry.threshold_before[1] = bcd(thd as u8);
+            }
+            let mut thd = row.threshold_after;
+            entry.threshold_after[0] = bcd(thd.trunc() as u8);
+            thd = thd.fract() * 100.0;
+            entry.threshold_after[1] = bcd(thd as u8);
+
+            if let Ok(entry) = bincode::serialize(&entry) {
+                let _ = writer.write_all(&entry).await?;
+            }
+        }
+    }
+
+    let mut rest_num: u16 = 0;
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        if let Ok(row) = sqlx::query!(r#"SELECT COUNT(*) as cnt FROM rest_threshold"#).fetch_one(&mut conn).await {
+            rest_num = row.cnt as u16;
+        }
+    }
+    let _ = writer.write(&rest_num.to_le_bytes()).await?;
+
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        let mut s = sqlx::query!(r#"SELECT timestamp_before, timestamp_after, threshold_before, threshold_after FROM rest_threshold"#)
+            .fetch(&mut conn);
+        while let Ok(Some(row)) = s.try_next().await {
+            debug!("[debug][rest-threshold] {:?}", row);
+
+            let mut entry = DownloadBlockTravelThreshold {
+                timestamp_before: [0; 7],
+                timestamp_after: [0; 7],
+                threshold_before: [0; 2],
+                threshold_after: [0; 2],
+            };
+
+            if let Some(ts) = row.timestamp_before {
+                bcd_timestamp(&mut entry.timestamp_before, ts)?;
+            }
+            if let Some(ts) = row.timestamp_after {
+                bcd_timestamp(&mut entry.timestamp_after, ts)?;
+            }
+            if let Some(mut thd) = row.threshold_before {
+                entry.threshold_before[0] = bcd(thd.trunc() as u8);
+                thd = thd.fract() * 100.0;
+                entry.threshold_before[1] = bcd(thd as u8);
+            }
+            let mut thd = row.threshold_after;
+            entry.threshold_after[0] = bcd(thd.trunc() as u8);
+            thd = thd.fract() * 100.0;
+            entry.threshold_after[1] = bcd(thd as u8);
+
+            if let Ok(entry) = bincode::serialize(&entry) {
+                let _ = writer.write_all(&entry).await?;
+            }
+        }
+    }
+
+    let mut block: DownloadBlockTechnology = DownloadBlockTechnology {
+        code: 0x02,
+        name: String::from("技術資料格式").as_bytes().try_into().unwrap(),
+        len: 0x00,
+
+        manufacture_name: [0; 36],
+        manufacture_address: [0; 36],
+        serial_number: [0; 8],
+        sw_version: [0; 4],
+        install_timestamp: [0; 7],
+        manufacture_date: [0; 4],
+        certification_number: [0; 8],
+        car_number: [0; 17],
+    };
+
+    if let Ok(mut conn) = fb161_sql_conn().await {
+        if let Ok(row) = sqlx::query!(r#"SELECT manufacture_name, manufacture_address, serial_number, sw_version, install_timestamp, manufacture_date as "manufacture_date: NaiveDate", certification_number, car_number FROM vehicle_unit"#).fetch_one(&mut conn).await {
+            copy_slice(&mut block.manufacture_name, row.manufacture_name.as_bytes());
+            copy_slice(&mut block.manufacture_address, row.manufacture_address.as_bytes());
+            copy_slice(&mut block.serial_number, row.serial_number.as_bytes());
+            copy_slice(&mut block.sw_version, row.sw_version.as_bytes());
+            copy_slice(&mut block.certification_number, row.certification_number.as_bytes());
+
+            if let Some(car_number) = row.car_number {
+                copy_slice(&mut block.car_number, car_number.as_bytes());
+            }
+
+            if let Some(ts) = row.install_timestamp {
+                bcd_timestamp(&mut block.install_timestamp, ts)?;
+            }
+            if let Some(ts) = row.manufacture_date {
+                block.manufacture_date[0] = bcd((ts.year() / 100) as u8);
+                block.manufacture_date[1] = bcd((ts.year() % 100) as u8);
+                block.manufacture_date[2] = bcd(ts.month() as u8);
+                block.manufacture_date[3] = bcd(ts.day() as u8);
+            }
+        }
+    }
+
+    if let Ok(curr_pos) = writer.seek(SeekFrom::Current(0)).await {
+        writer.seek(SeekFrom::Start(prev_pos)).await?;
+        block.len = (mem::size_of::<DownloadBlockTechnology>()
+                     - mem::size_of::<DownloadBlockGeneric>()
+                     + mem::size_of::<u16/*num*/>()) as u32;
+        block.len += (calibration_num as u32) * (mem::size_of::<DownloadBlockCalibration>()) as u32;
+        block.len += (td_num as u32) * (mem::size_of::<DownloadBlockTimeDate>()) as u32;
+        block.len += (travel_num as u32) * (mem::size_of::<DownloadBlockTravelThreshold>()) as u32;
+        block.len += (rest_num as u32) * (mem::size_of::<DownloadBlockRestThreshold>()) as u32;
         let block= bincode::serialize(&block)?;
         let wn = writer.write_all(&block).await;
         assert!(wn.is_ok());
@@ -902,11 +1202,13 @@ async fn test_fb161_download() {
         {
             //TODO
             let mut block_num = Vec::new();
-            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 3).unwrap();
+            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 5).unwrap();
             let _ = writer.write_all(&Bytes::from(block_num)).await;
         }
         let _ = fb161_download_event(&mut writer).await;
         let _ = fb161_download_velocity(&mut writer).await;
+        let _ = fb161_download_vu(&mut writer).await;
+        let _ = fb161_download_driver(&mut writer).await;
         let _ = fb161_download_location(&mut writer).await;
         {
             //TODO
@@ -916,7 +1218,7 @@ async fn test_fb161_download() {
         writer.flush().await.unwrap();
     }
     else {
-        assert!(false);
+        panic!("fb161_download");
     }
 }
 #[tokio::test]
@@ -950,7 +1252,7 @@ async fn test_fb161_download_location() {
         writer.flush().await.unwrap();
     }
     else {
-        assert!(false);
+        panic!("fb161_download_location");
     }
 }
 
@@ -974,7 +1276,7 @@ async fn test_fb161_download_velocity() {
         writer.flush().await.unwrap();
     }
     else {
-        assert!(false);
+        panic!("fb161_download_velocity");
     }
 }
 
@@ -998,6 +1300,71 @@ async fn test_fb161_download_driver() {
         writer.flush().await.unwrap();
     }
     else {
-        assert!(false);
+        panic!("fb161_download_driver");
+    }
+}
+
+#[tokio::test]
+async fn test_fb161_download_vu() {
+    if let Ok(file)  = File::create("/tmp/fb161_vu.vdr").await {
+        let mut writer = BufWriter::new(file);
+
+        {
+            //TODO
+            let mut block_num = Vec::new();
+            WriteBytesExt::write_u16::<LittleEndian>(&mut block_num, 1).unwrap();
+            let _ = writer.write_all(&Bytes::from(block_num)).await;
+        }
+        let _ = fb161_download_vu(&mut writer).await;
+        {
+            //TODO
+            let block_checksum = b"\xFA";
+            let _ = writer.write_all(block_checksum).await;
+        }
+        writer.flush().await.unwrap();
+    }
+    else {
+        panic!("test_fb161_download_vu");
+    }
+}
+
+fn copy_slice<'a>(a: &'a mut [u8], s: &[u8]) -> &'a[u8] {
+    let sn = s.len();
+    let an = a.len();
+    if an > sn {
+        a[..sn].copy_from_slice(s);
+    }
+    else {
+        a[..an].copy_from_slice(&s[..an]);
+    }
+    a
+}
+
+#[tokio::test]
+async fn test_copy_slice() {
+    let mut a = [0u8; 5];
+    let s = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let r = copy_slice(&mut a, &s[1..3]);
+    assert_eq!(r, [2u8, 3, 0, 0, 0]);
+
+    let mut b = [5u8; 11];
+    let r = copy_slice(&mut b, &s);
+    assert_eq!(r, [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 5u8]);
+}
+
+fn bcd_timestamp(buff: &mut [u8; 7], ts: NaiveDateTime) -> Result<()> {
+    if buff.len() >= 7 {
+        buff[0] = bcd((ts.year() / 100) as u8);
+        buff[1] = bcd((ts.year() % 100) as u8);
+        buff[2] = bcd(ts.month() as u8);
+        buff[3] = bcd(ts.day() as u8);
+        buff[4] = bcd(ts.hour() as u8);
+        buff[5] = bcd(ts.minute() as u8);
+        buff[6] = bcd(ts.second() as u8);
+
+        Ok(())
+    }
+    else {
+        Err(anyhow!("current seek error"))
     }
 }
