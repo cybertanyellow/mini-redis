@@ -21,6 +21,10 @@ path = "src/bin/cli.rs"
 name = "flatbread-server"
 path = "src/bin/server.rs"
 
+[[bin]]
+name = "flatbread-download"
+path = "src/bin/download.rs"
+
 [dependencies]
 async-stream = "0.3.0"
 atoi = "0.3.2"

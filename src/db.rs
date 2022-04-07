@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 use tokio::sync::mpsc;
-use crate::fb161_sql::FbSql;
+use crate::fb161::Fb161Sql;
 
 /// A wrapper around a `Db` instance. This exists to allow orderly cleanup
 /// of the `Db` by signalling the background purge task to shut down when
@@ -437,7 +437,7 @@ async fn request_tx_task(ch: mpsc::Sender<(String, String, Bytes)>, msg: (String
 /*async fn fb161_period_cache2sql_tasks(shared: Arc<Shared>, mut request: mpsc::Receiver<(String, String, Bytes)>) {
     let mut interval_500ms = time::interval(time::Duration::from_millis(500));
     let mut interval_1s = time::interval(time::Duration::from_millis(1000));
-    let mut flatbread = FbSql::new().await;
+    let mut flatbread = Fb161Sql::new().await;
 
 
     // If the shutdown flag is set, then the task should exit.
@@ -550,7 +550,7 @@ async fn request_tx_task(ch: mpsc::Sender<(String, String, Bytes)>, msg: (String
 async fn fb161_db_task(db: Db, mut request: mpsc::Receiver<(String, String, Bytes)>) {
     let mut interval_velocity = time::interval(time::Duration::from_millis(500));
     let mut interval_location = time::interval(time::Duration::from_millis(1000));
-    let mut fb_sql = FbSql::new().await;
+    let mut fb_sql = Fb161Sql::new().await;
 
     let mut speed = 0.0;
     let mut odo = 100.0;
@@ -595,6 +595,12 @@ async fn fb161_db_task(db: Db, mut request: mpsc::Receiver<(String, String, Byte
 }
 
 fn db_velocity_task_unit(db: &Db, speed: &mut f64, odo: &mut f64) {
+    /* gpio/wheeltick
+     * /sys/bus/counter/devices/counter0/count0 node generated after build-in interrupt-counter device-tree & driver,
+     * echo ON|OFF > /sys/bus/counter/devices/counter0/count0/enable
+     * cat /sys/bus/counter/devices/counter0/count0/count
+     */
+
     //debug!("vlocity => current_timestamp-{:?}", chrono::offset::Utc::now());
     let cmd = format!(r#"{{"speed":{},"odo":{}}}"#, speed, odo);
     *odo += *speed / 36000.0;

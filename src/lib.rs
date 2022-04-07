@@ -41,7 +41,7 @@ mod db;
 use db::Db;
 use db::DbDropGuard;
 
-mod fb161_sql;
+pub mod fb161;
 
 mod parse;
 use parse::{Parse, ParseError};
