@@ -31,7 +31,7 @@ async fn main() -> flatbread::Result<()> {
     //let ts = NaiveDateTime::parse_from_str(&cli.start_time, "%Y-%m-%d %H:%M:%S")?;
 
     let mut downloader = Fb161Downloader::new(cli.db_url, cli.start_time, cli.dst).await;
-    downloader.download().await?;
+    downloader.download(flatbread::fb161::DownloadType::All).await?;
 
     info!("Download complete");
 

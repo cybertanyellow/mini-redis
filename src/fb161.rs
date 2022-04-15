@@ -7,10 +7,12 @@ use sqlx::types::chrono::{DateTime, Utc, NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use chrono::serde::ts_seconds;
 use anyhow::Result;
+use tokio::fs;
 use tokio::fs::File;
 use tokio::io::{SeekFrom, AsyncSeekExt};
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::io::{AsyncReadExt, BufReader};
+use tokio::time::{self, Duration};
 use sqlx::Sqlite;
 use chrono::{Timelike, Datelike};
 use tokio_stream::StreamExt;
@@ -20,6 +22,7 @@ use serde_big_array::BigArray;
 use anyhow::anyhow;
 use std::mem;
 use dotenv::dotenv;
+use std::path::Path;
 
 #[derive(Debug)]
 pub(crate) struct Fb161Sql {
@@ -636,6 +639,15 @@ pub struct Fb161Downloader {
     //reader: BufReader<File>,
 }
 
+pub enum DownloadType {
+    EventError,
+    Velocity,
+    VehicleUnit,
+    Driver,
+    Location,
+    All,
+}
+
 impl Fb161Downloader {
     pub async fn new(db_url: Option<String>, start_time: Option<NaiveDateTime>, dst: String) -> Self {
         if let Ok(file) = File::create(&dst).await {
@@ -759,6 +771,8 @@ impl Fb161Downloader {
                 code: 0x00,
                 name: String::from("事件故障資料").as_bytes().try_into().unwrap(),
                 len: (mem::size_of::<DownloadEntryEvent>() as u32 * event_num as u32)
+                    + (mem::size_of::<u8>() as u32 /* event_num */)
+                    + (mem::size_of::<u8>() as u32 /* error_num */)
                     + (mem::size_of::<DownloadEntryError>() as u32 * error_num as u32),
             };
             let block = bincode::serialize(&block)?;
@@ -1284,15 +1298,39 @@ impl Fb161Downloader {
         Ok(())
     }
 
-    pub async fn download(&mut self) -> Result<()> {
+    pub async fn download(&mut self, dtype: DownloadType) -> Result<()> {
         let _start_pos = self.writer.seek(SeekFrom::Current(0)).await?;
 
-        self.header(0x05).await?;
-        self.download_event().await?;
-        self.download_velocity().await?;
-        self.download_vu().await?;
-        self.download_driver().await?;
-        self.download_location().await?;
+        match dtype {
+            DownloadType::EventError => {
+                self.header(0x01).await?;
+                self.download_event().await?;
+            },
+            DownloadType::Velocity => {
+                self.header(0x01).await?;
+                self.download_velocity().await?;
+            },
+            DownloadType::VehicleUnit => {
+                self.header(0x01).await?;
+                self.download_vu().await?;
+            },
+            DownloadType::Driver => {
+                self.header(0x01).await?;
+                self.download_driver().await?;
+            },
+            DownloadType::Location => {
+                self.header(0x01).await?;
+                self.download_location().await?;
+            },
+            DownloadType::All => {
+                self.header(0x05).await?;
+                self.download_event().await?;
+                self.download_velocity().await?;
+                self.download_vu().await?;
+                self.download_driver().await?;
+                self.download_location().await?;
+            }
+        }
         self.writer.flush().await?;
 
         let _end_pos = self.writer.seek(SeekFrom::Current(0)).await?;
@@ -1325,8 +1363,22 @@ impl Fb161Downloader {
 
 #[tokio::test]
 async fn test_fb161_oo() {
-    let mut fb161 = Fb161Downloader::new(None, None, "./test_fb161_oo.vdr".to_string()).await;
-    fb161.download().await.unwrap();
+    let mut fb161 = Fb161Downloader::new(None, None, "./test_fb161_dwonload_oo.vdr".to_string()).await;
+    fb161.download(DownloadType::All).await.unwrap();
+    assert!(fb161.check(5).await.is_ok());
+}
+
+#[tokio::test]
+async fn test_fb161_oo_download_event() {
+    let mut fb161 = Fb161Downloader::new(None, None, "./test_fb161_download_oo_event.vdr".to_string()).await;
+    fb161.download(DownloadType::EventError).await.unwrap();
+    assert!(fb161.check(5).await.is_ok());
+}
+
+#[tokio::test]
+async fn test_fb161_oo_download_velocity() {
+    let mut fb161 = Fb161Downloader::new(None, None, "./test_fb161_download_oo_velocity.vdr".to_string()).await;
+    fb161.download(DownloadType::Velocity).await.unwrap();
     assert!(fb161.check(5).await.is_ok());
 }
 
@@ -1378,3 +1430,100 @@ pub fn bcd(n: u8) -> u8 {
     r
 }
 
+pub enum CntNode {
+    Enable(String),
+    Count(String),
+}
+
+#[derive(Debug)]
+pub(crate) struct Fb161WheelTick {
+    src: File,
+    cnt: u64,
+    impulse_coefficient: f32,
+}
+
+impl Fb161WheelTick {
+    pub async fn enable<T: AsRef<Path>>(path: T, impulse_coefficient: f32) -> Result<Self> {
+        let pb = fs::canonicalize(path.as_ref()).await?;
+
+        if !fs::metadata(&pb).await?.is_dir() {
+            return Err(anyhow!("directory not exist"));
+        }
+
+        let enable = pb.join("enable");
+        let mut value = String::new();
+        {
+            let mut f = File::open(&enable).await?;
+            f.read_to_string(&mut value).await?;
+        }
+        if value.trim() != "1" {
+            let mut f = File::create(&enable).await?;
+            f.write_all("ON".as_bytes()).await?;
+        }
+
+        let count = pb.join("count");
+        Ok(Fb161WheelTick {
+           src: File::open(&count).await?,
+           cnt: 0,
+           impulse_coefficient,
+        })
+    }
+
+    pub async fn read_tick(&mut self) -> Result<u64> {
+        let mut got = String::new();
+
+        self.src.read_to_string(&mut got).await?;
+        let got = got.trim().parse::<u64>()?;
+        self.cnt = got;
+        Ok(got)
+    }
+
+    async fn diff_tick(&mut self) -> Result<u64> {
+        let got = self.read_tick().await?;
+        let diff = got - self.cnt;
+        self.cnt = got;
+        Ok(diff)
+    }
+
+    pub async fn tick_speed(&mut self, duration: Duration) -> Result<f32> {
+        let speed: f32 = convert_speed(self.diff_tick().await.unwrap(), duration, self.impulse_coefficient);
+        Ok(speed)
+    }
+}
+
+fn convert_speed(ticks: u64, duration: Duration, impulse_coefficient: f32) -> f32 {
+    //let cnt: f32 = (ticks * (1000 / duration.as_millis() as u64)) as f32;
+    let cnt: f64 = ((ticks * 1000) as f64) / (duration.as_millis() as f64);
+    let pulse: f64 = (8000.0 * impulse_coefficient).into();
+    ((60.0 * 60.0 * cnt) / pulse) as f32
+}
+
+#[tokio::test]
+async fn test_fb161_wheel_tick() {
+    let wheel = Fb161WheelTick::enable(&"/sys/bus/counter/devices/counter0/count0", 1_f32).await;
+    assert!(wheel.is_ok());
+
+    let tick = wheel.unwrap().read_tick().await;
+    assert!(tick.is_ok());
+}
+
+#[tokio::test]
+async fn test_fb161_wheel_speed() {
+    let speed = convert_speed(2000 / 60, Duration::from_millis(500), 1_f32);
+    assert_eq!(speed, 29.7);
+
+    let speed = convert_speed(8000, Duration::from_secs(60), 1_f32);
+    assert_eq!(speed, 60.0);
+
+    let speed = convert_speed(8000 / 60, Duration::from_secs(1), 1_f32);
+    assert_eq!(speed, 59.85);
+
+    let speed = convert_speed(4000 / 60, Duration::from_millis(500), 1_f32);
+    assert_eq!(speed, 59.4);
+
+    let speed = convert_speed(2 * 4000 / 60, Duration::from_millis(500), 1_f32);
+    assert_eq!(speed, 119.7);
+
+    let speed = convert_speed(8000 / 60, Duration::from_millis(500), 119.7/120.0);
+    assert_eq!(speed, 120.0);
+}
